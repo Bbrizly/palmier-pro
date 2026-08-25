@@ -2,24 +2,6 @@ import AppKit
 import SwiftUI
 
 @MainActor
-enum FilmStudioIntegration {
-    static func installMenuItem() {
-        guard let viewMenu = NSApp.mainMenu?.items
-            .first(where: { $0.submenu?.title == L10n.string("View") })?
-            .submenu
-        else { return }
-
-        let action = #selector(FilmStudioWindowController.showFromMenu(_:))
-        guard !viewMenu.items.contains(where: { $0.action == action }) else { return }
-
-        viewMenu.addItem(.separator())
-        let item = NSMenuItem(title: "Film Studio…", action: action, keyEquivalent: "")
-        item.target = FilmStudioWindowController.shared
-        viewMenu.addItem(item)
-    }
-}
-
-@MainActor
 struct FilmStudioPalmierBridge {
     func importPlayableCut(using model: PalmierFilmStudioModel) {
         guard let editor = AppState.shared.activeProject?.editorViewModel else {
@@ -32,13 +14,29 @@ struct FilmStudioPalmierBridge {
 
 @MainActor
 final class FilmStudioWindowController: NSWindowController {
-    static let shared = FilmStudioWindowController(window: nil)
+    static let shared = FilmStudioWindowController()
 
-    private let model = PalmierFilmStudioModel()
-    private let bridge = FilmStudioPalmierBridge()
-    private var hostingController: NSHostingController<FilmStudioWorkspaceView>?
+    private let model: PalmierFilmStudioModel
 
-    private override init(window: NSWindow?) {
+    private init() {
+        let model = PalmierFilmStudioModel()
+        self.model = model
+        let rootView = FilmStudioWorkspaceView(
+            model: model,
+            bridge: FilmStudioPalmierBridge()
+        )
+        .appLocalization()
+        .tint(AppTheme.Accent.primary)
+        let hostingController = NSHostingController(rootView: rootView)
+        let window = NSWindow(contentViewController: hostingController)
+        window.title = "Palmier Film Studio"
+        window.styleMask = [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView]
+        window.setContentSize(AppTheme.Window.settingsDefault)
+        window.minSize = AppTheme.Window.settingsMin
+        window.backgroundColor = AppTheme.Background.base
+        window.titlebarAppearsTransparent = true
+        window.isReleasedWhenClosed = false
+        window.center()
         super.init(window: window)
     }
 
@@ -47,30 +45,10 @@ final class FilmStudioWindowController: NSWindowController {
         fatalError("init(coder:) has not been implemented")
     }
 
-    @objc func showFromMenu(_ sender: Any?) {
-        show()
-    }
-
     func show() {
-        let rootView = FilmStudioWorkspaceView(model: model, bridge: bridge)
-
-        if let hostingController {
-            hostingController.rootView = rootView
-        } else {
-            let hostingController = NSHostingController(rootView: rootView)
-            let window = NSWindow(contentViewController: hostingController)
-            window.title = "Palmier Film Studio"
-            window.styleMask = [.titled, .closable, .miniaturizable, .resizable]
-            window.setContentSize(NSSize(width: 1_100, height: 760))
-            window.minSize = NSSize(width: 980, height: 660)
-            window.isReleasedWhenClosed = false
-            window.center()
-            self.hostingController = hostingController
-            self.window = window
-        }
-
-        NSApp.activate(ignoringOtherApps: true)
+        model.activate()
         showWindow(nil)
         window?.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
     }
 }
