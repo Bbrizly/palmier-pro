@@ -5,68 +5,89 @@ import Foundation
 
 @MainActor
 final class PalmierFilmStudioModel: ObservableObject {
-    struct RuntimeDependency: Identifiable, Equatable {
-        let id: String
-        let label: String
-        let available: Bool
-        let detail: String
-    }
-
     enum StudioError: LocalizedError {
         case noProject
         case noPlayableCut
-        case noInstalledAgentModel
         case noPalmierProject
         case importRejected
+        case setupIncomplete
 
         var errorDescription: String? {
             switch self {
-            case .noProject: "Open or create a film first."
-            case .noPlayableCut: "GRACE has not produced a playable cut yet."
-            case .noInstalledAgentModel: "mere.run did not report an installed local agent model that it can start."
-            case .noPalmierProject: "Open a Palmier project before importing the GRACE cut."
-            case .importRejected: "Palmier did not import the GRACE cut. Check that the generated file is a supported media type."
+            case .noProject:
+                "Open or create a film first."
+            case .noPlayableCut:
+                "GRACE has not produced a playable cut yet."
+            case .noPalmierProject:
+                "Open a Palmier project before importing the GRACE cut."
+            case .importRejected:
+                "Palmier did not import the GRACE cut. Check that the generated file is a supported media type."
+            case .setupIncomplete:
+                "Finish Film Studio setup before starting or advancing a production."
             }
         }
     }
 
     @Published private(set) var snapshot: FilmWorkspaceSnapshot?
-    @Published private(set) var runtimeDependencies: [RuntimeDependency] = []
-    @Published private(set) var selectedAgentModel: MereRunAgentModel?
+    @Published private(set) var playableCutURL: URL?
+    @Published private(set) var runtime: FilmStudioRuntimeStatus?
+    @Published private(set) var isRuntimeRefreshing = false
     @Published private(set) var isBusy = false
     @Published private(set) var activity = ""
     @Published var errorMessage: String?
     @Published var noticeMessage: String?
 
-    @Published var filmToolExecutable: String {
-        didSet { UserDefaults.standard.set(filmToolExecutable, forKey: "palmierFilmStudio.filmToolExecutable") }
+    @Published var filmToolOverride: String {
+        didSet { UserDefaults.standard.set(filmToolOverride, forKey: Keys.filmToolOverride) }
     }
-    @Published var piExecutable: String {
-        didSet { UserDefaults.standard.set(piExecutable, forKey: "palmierFilmStudio.piExecutable") }
-    }
-    @Published var mereRunExecutable: String {
-        didSet { UserDefaults.standard.set(mereRunExecutable, forKey: "palmierFilmStudio.mereRunExecutable") }
+    @Published var mereRunOverride: String {
+        didSet { UserDefaults.standard.set(mereRunOverride, forKey: Keys.mereRunOverride) }
     }
 
     @Published var newFilmIdea = ""
     @Published var newFilmTitle = ""
     @Published var newFilmDuration = 45
-    @Published var newFilmDirectory = FileManager.default.homeDirectoryForCurrentUser
+    @Published var newFilmDirectory = URL(fileURLWithPath: NSHomeDirectory())
         .appending(path: "Movies/Palmier Films", directoryHint: .isDirectory)
 
     let durationOptions = [15, 30, 45, 60, 90, 120]
+
+    private enum Keys {
+        static let filmToolOverride = "palmierFilmStudio.filmToolOverride"
+        static let mereRunOverride = "palmierFilmStudio.mereRunOverride"
+        static let lastRunManifest = "palmierFilmStudio.lastRunManifest"
+    }
+
     private var commandTask: Task<Void, Never>?
+    private var projectLoadTask: Task<Void, Never>?
+    private var watcherTask: Task<Void, Never>?
+    private var refreshDebounceTask: Task<Void, Never>?
+    private var watcher: FilmStudioProjectWatcher?
+    private var watchedRoot: URL?
+    private var projectLoadID = UUID()
+    private var restoredLastProject = false
 
     init() {
-        filmToolExecutable = UserDefaults.standard.string(forKey: "palmierFilmStudio.filmToolExecutable") ?? "mere-film-tools"
-        piExecutable = UserDefaults.standard.string(forKey: "palmierFilmStudio.piExecutable") ?? "pi"
-        mereRunExecutable = UserDefaults.standard.string(forKey: "palmierFilmStudio.mereRunExecutable")
-            ?? ProcessInfo.processInfo.environment["MERE_RUN_EXECUTABLE"]
-            ?? "mere.run"
+        filmToolOverride = UserDefaults.standard.string(forKey: Keys.filmToolOverride) ?? ""
+        mereRunOverride = UserDefaults.standard.string(forKey: Keys.mereRunOverride) ?? ""
+    }
 
-        if let lastRun = UserDefaults.standard.string(forKey: "palmierFilmStudio.lastRunManifest") {
-            openProject(URL(fileURLWithPath: lastRun), reportErrors: false)
-        }
+    deinit {
+        commandTask?.cancel()
+        projectLoadTask?.cancel()
+        watcherTask?.cancel()
+        refreshDebounceTask?.cancel()
+    }
+
+    var filmToolExecutable: String {
+        let override = filmToolOverride.trimmingCharacters(in: .whitespacesAndNewlines)
+        return override.isEmpty ? "mere-film-tools" : override
+    }
+
+    var mereRunExecutable: String {
+        let override = mereRunOverride.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !override.isEmpty { return override }
+        return ProcessInfo.processInfo.environment["MERE_RUN_EXECUTABLE"] ?? "mere.run"
     }
 
     var pendingGate: String? {
@@ -75,10 +96,13 @@ final class PalmierFilmStudioModel: ObservableObject {
             .first { approvals[$0]?.status == "pending" }
     }
 
-    var runtimeReady: Bool {
-        let required = Set(["mere-film-tools", "mere.run", "pi", "ffmpeg", "ffprobe", "agent-model"])
-        let available = Set(runtimeDependencies.filter(\.available).map(\.id))
-        return required.isSubset(of: available)
+    var productionReady: Bool { runtime?.productionReady == true }
+    var canCreateFilm: Bool { productionReady && !isBusy }
+    var canApprove: Bool { snapshot != nil && pendingGate != nil && runtime?.filmToolsReady == true && !isBusy }
+    var canAdvance: Bool { snapshot != nil && pendingGate == nil && productionReady && !isBusy }
+    var canReview: Bool { snapshot != nil && playableCutURL != nil && productionReady && !isBusy }
+    var hasInterruptedWork: Bool {
+        snapshot?.project.jobs.contains { $0.status == "running" } == true
     }
 
     var effectiveNewFilmTitle: String {
@@ -92,13 +116,29 @@ final class PalmierFilmStudioModel: ObservableObject {
         let slug = effectiveNewFilmTitle.lowercased()
             .replacingOccurrences(of: "[^a-z0-9]+", with: "-", options: .regularExpression)
             .trimmingCharacters(in: CharacterSet(charactersIn: "-"))
-        return newFilmDirectory.appending(path: slug.isEmpty ? "untitled-film" : slug, directoryHint: .isDirectory)
+        return newFilmDirectory.appending(
+            path: slug.isEmpty ? "untitled-film" : slug,
+            directoryHint: .isDirectory
+        )
+    }
+
+    func activate() {
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            await self.refreshRuntime()
+        }
+        guard !restoredLastProject else { return }
+        restoredLastProject = true
+        guard snapshot == nil,
+              let lastRun = UserDefaults.standard.string(forKey: Keys.lastRunManifest) else { return }
+        openProject(URL(fileURLWithPath: lastRun), reportErrors: false)
     }
 
     func chooseProject() {
+        guard !isBusy else { return }
         let panel = NSOpenPanel()
-        panel.title = "Open GRACE Film"
-        panel.message = "Choose the run.json generated by mere-film-tools."
+        panel.title = "Open Film"
+        panel.message = "Choose the run.json for a GRACE film."
         panel.prompt = "Open Film"
         panel.allowedContentTypes = [.json]
         panel.allowsMultipleSelection = false
@@ -119,176 +159,267 @@ final class PalmierFilmStudioModel: ObservableObject {
     }
 
     func openProject(_ input: URL, reportErrors: Bool = true) {
-        do {
-            let runManifest = input.lastPathComponent == "run.json" ? input : input.appending(path: "run.json")
-            let loaded = try FilmProjectLoader.load(runManifest: runManifest)
-            snapshot = loaded
-            UserDefaults.standard.set(loaded.runManifest.path, forKey: "palmierFilmStudio.lastRunManifest")
-            errorMessage = nil
-        } catch {
-            if reportErrors { errorMessage = error.localizedDescription }
+        guard !isBusy else { return }
+        let runManifest = input.lastPathComponent == "run.json"
+            ? input.standardizedFileURL
+            : input.appending(path: "run.json").standardizedFileURL
+        projectLoadTask?.cancel()
+        projectLoadID = UUID()
+        let requestID = projectLoadID
+        projectLoadTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            do {
+                let loaded = try await FilmStudioService.loadProject(runManifest: runManifest)
+                try Task.checkCancellation()
+                guard self.projectLoadID == requestID else { return }
+                self.applyLoadedProject(loaded)
+                self.errorMessage = nil
+            } catch is CancellationError {
+                return
+            } catch {
+                if reportErrors { self.errorMessage = error.localizedDescription }
+            }
         }
-    }
-
-    func refreshProject() {
-        guard let runManifest = snapshot?.runManifest else { return }
-        openProject(runManifest)
     }
 
     func closeProject() {
-        commandTask?.cancel()
-        isBusy = false
-        activity = ""
+        guard !isBusy else { return }
+        projectLoadTask?.cancel()
+        watcherTask?.cancel()
+        refreshDebounceTask?.cancel()
+        watcher = nil
+        watchedRoot = nil
         snapshot = nil
+        playableCutURL = nil
         noticeMessage = nil
-        UserDefaults.standard.removeObject(forKey: "palmierFilmStudio.lastRunManifest")
+        errorMessage = nil
+        UserDefaults.standard.removeObject(forKey: Keys.lastRunManifest)
     }
 
     func refreshRuntime() async {
-        var dependencies: [RuntimeDependency] = []
-        let filmTool = resolvedDependency(id: "mere-film-tools", label: "mere-film-tools", value: filmToolExecutable)
-        dependencies.append(filmTool.row)
-        let mereRun = resolvedDependency(id: "mere.run", label: "mere.run", value: mereRunExecutable)
-        dependencies.append(mereRun.row)
+        guard !isRuntimeRefreshing else { return }
+        isRuntimeRefreshing = true
+        let status = await FilmStudioService.inspectRuntime(
+            filmToolExecutable: filmToolExecutable,
+            mereRunExecutable: mereRunExecutable
+        )
+        runtime = status
+        isRuntimeRefreshing = false
+    }
 
-        do {
-            let pi = try PiExecutableResolver.resolve(piExecutable)
-            dependencies.append(.init(id: "pi", label: "Pi", available: true, detail: pi.path))
-        } catch {
-            dependencies.append(.init(id: "pi", label: "Pi", available: false, detail: error.localizedDescription))
+    func installFilmTools() {
+        guard !isBusy, runtime?.mereRunReady == true else { return }
+        let mereRunExecutable = mereRunExecutable
+        runSetupRepair(
+            activity: "Installing Film Studio tools…",
+            success: "Film Studio tools are installed."
+        ) {
+            try await FilmStudioService.installFilmTools(mereRunExecutable: mereRunExecutable)
         }
+    }
 
-        dependencies.append(resolvedDependency(id: "ffmpeg", label: "ffmpeg", value: "ffmpeg").row)
-        dependencies.append(resolvedDependency(id: "ffprobe", label: "ffprobe", value: "ffprobe").row)
-
-        selectedAgentModel = nil
-        if let mereRunURL = mereRun.url {
-            do {
-                let status = try await MereRunAgentClient(executable: mereRunURL.path).status()
-                if let model = status.bestInstalledModel {
-                    selectedAgentModel = model
-                    dependencies.append(.init(id: "agent-model", label: "Local agent model", available: true, detail: "\(model.displayName) · \(model.id)"))
-                } else {
-                    dependencies.append(.init(id: "agent-model", label: "Local agent model", available: false, detail: StudioError.noInstalledAgentModel.localizedDescription))
-                }
-            } catch {
-                dependencies.append(.init(id: "agent-model", label: "Local agent model", available: false, detail: error.localizedDescription))
-            }
-        } else {
-            dependencies.append(.init(id: "agent-model", label: "Local agent model", available: false, detail: "mere.run is unavailable."))
+    func installPi() {
+        guard !isBusy, runtime?.mereRunReady == true else { return }
+        let mereRunExecutable = mereRunExecutable
+        runSetupRepair(
+            activity: "Installing Pi…",
+            success: "Pi is installed."
+        ) {
+            try await FilmStudioService.installPi(mereRunExecutable: mereRunExecutable)
         }
+    }
 
-        runtimeDependencies = dependencies
+    func copyModelSetupCommand() {
+        guard let runtime else { return }
+        copyToPasteboard(FilmStudioService.modelSetupCommand(runtime: runtime, mereRunExecutable: mereRunExecutable))
+        noticeMessage = runtime.recommendedModel == nil
+            ? "Copied the Mere agent setup command."
+            : "Copied the recommended model install command. Review any model terms shown by Mere before accepting them."
+    }
+
+    func copyFFmpegInstallCommand() {
+        copyToPasteboard("brew install ffmpeg")
+        noticeMessage = "Copied: brew install ffmpeg"
+    }
+
+    func openMereDownloads() {
+        guard let url = URL(string: "https://mere.run/releases") else { return }
+        NSWorkspace.shared.open(url)
+    }
+
+    func resetExecutableOverrides() {
+        filmToolOverride = ""
+        mereRunOverride = ""
+        Task { @MainActor [weak self] in
+            await self?.refreshRuntime()
+        }
     }
 
     func createFilm() {
+        guard canCreateFilm else {
+            errorMessage = StudioError.setupIncomplete.localizedDescription
+            return
+        }
         let idea = newFilmIdea.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !idea.isEmpty else {
             errorMessage = "Enter an idea for the film."
             return
         }
         let title = effectiveNewFilmTitle
-        let output = newFilmProjectDirectory
         let duration = newFilmDuration
+        let output = newFilmProjectDirectory
         let filmToolExecutable = filmToolExecutable
-        let piExecutable = piExecutable
+        let mereRunExecutable = mereRunExecutable
 
-        perform("Creating film…") { [weak self] in
-            try FileManager.default.createDirectory(at: output.deletingLastPathComponent(), withIntermediateDirectories: true)
-            let pi = try PiExecutableResolver.resolve(piExecutable)
-            let runManifest = try await FilmToolClient(executable: filmToolExecutable).plan(
-                idea: idea,
-                title: title,
-                durationSeconds: duration,
-                outputDirectory: output,
-                piCommand: pi.path
-            )
-            self?.openProject(runManifest)
-            self?.newFilmIdea = ""
-            self?.newFilmTitle = ""
+        beginActivity("Creating film…")
+        commandTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            defer { self.endActivity() }
+            do {
+                let runManifest = try await FilmStudioService.createFilm(
+                    idea: idea,
+                    title: title,
+                    durationSeconds: duration,
+                    outputDirectory: output,
+                    filmToolExecutable: filmToolExecutable,
+                    mereRunExecutable: mereRunExecutable
+                )
+                let loaded = try await FilmStudioService.loadProject(runManifest: runManifest)
+                self.applyLoadedProject(loaded)
+                self.newFilmIdea = ""
+                self.newFilmTitle = ""
+                self.noticeMessage = "Film created. Review the brief, then approve it when it looks right."
+            } catch {
+                self.errorMessage = error.localizedDescription
+            }
         }
     }
 
     func approvePendingGate() {
-        guard let runManifest = snapshot?.runManifest, let gate = pendingGate else { return }
+        guard canApprove,
+              let runManifest = snapshot?.runManifest,
+              let gate = pendingGate else { return }
         let filmToolExecutable = filmToolExecutable
-        perform("Approving \(gate)…") { [weak self] in
-            try await FilmToolClient(executable: filmToolExecutable).approve(
-                runManifest: runManifest,
-                gate: gate,
-                note: "Approved in Palmier Pro after reviewing the current GRACE evidence.",
-                approvedBy: NSFullUserName().isEmpty ? "macOS user" : NSFullUserName()
-            )
-            self?.noticeMessage = "Approved \(gate)."
+        let approvedBy = NSFullUserName().isEmpty ? "macOS user" : NSFullUserName()
+        beginActivity("Approving \(displayName(gate))…")
+        commandTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            defer { self.endActivity() }
+            do {
+                try await FilmStudioService.approve(
+                    runManifest: runManifest,
+                    gate: gate,
+                    approvedBy: approvedBy,
+                    filmToolExecutable: filmToolExecutable
+                )
+                await self.reloadCurrentProject(reportErrors: true)
+                self.noticeMessage = "Approved \(self.displayName(gate)). You can continue production."
+            } catch {
+                self.errorMessage = error.localizedDescription
+            }
         }
     }
 
     func advance() {
-        guard let runManifest = snapshot?.runManifest else {
-            errorMessage = StudioError.noProject.localizedDescription
-            return
-        }
+        guard canAdvance, let runManifest = snapshot?.runManifest else { return }
         let filmToolExecutable = filmToolExecutable
-        let piExecutable = piExecutable
         let mereRunExecutable = mereRunExecutable
-        perform("Advancing production…") { [weak self] in
-            let context = try await Self.resolveAgentContext(piExecutable: piExecutable, mereRunExecutable: mereRunExecutable)
-            _ = try await FilmToolClient(executable: filmToolExecutable).advance(
-                runManifest: runManifest,
-                piCommand: context.pi.path,
-                piProvider: "mere-run",
-                piModel: context.model.id
-            )
-            self?.selectedAgentModel = context.model
+        beginActivity("Continuing production…")
+        commandTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            defer { self.endActivity() }
+            do {
+                try await FilmStudioService.advance(
+                    runManifest: runManifest,
+                    filmToolExecutable: filmToolExecutable,
+                    mereRunExecutable: mereRunExecutable
+                )
+                await self.reloadCurrentProject(reportErrors: true)
+                if let gate = self.pendingGate {
+                    self.noticeMessage = "Production stopped for \(self.displayName(gate)) approval."
+                } else {
+                    self.noticeMessage = "Production advanced."
+                }
+            } catch {
+                self.errorMessage = error.localizedDescription
+                await self.reloadCurrentProject(reportErrors: false)
+            }
         }
     }
 
     func runReview() {
-        guard let runManifest = snapshot?.runManifest else {
-            errorMessage = StudioError.noProject.localizedDescription
-            return
-        }
+        guard canReview, let runManifest = snapshot?.runManifest else { return }
         let filmToolExecutable = filmToolExecutable
-        let piExecutable = piExecutable
         let mereRunExecutable = mereRunExecutable
-        perform("Running review…") { [weak self] in
-            let context = try await Self.resolveAgentContext(piExecutable: piExecutable, mereRunExecutable: mereRunExecutable)
-            _ = try await FilmToolClient(executable: filmToolExecutable).review(
-                runManifest: runManifest,
-                piCommand: context.pi.path,
-                piProvider: "mere-run",
-                piModel: context.model.id
-            )
-            self?.selectedAgentModel = context.model
+        beginActivity("Reviewing film…")
+        commandTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            defer { self.endActivity() }
+            do {
+                try await FilmStudioService.review(
+                    runManifest: runManifest,
+                    filmToolExecutable: filmToolExecutable,
+                    mereRunExecutable: mereRunExecutable
+                )
+                await self.reloadCurrentProject(reportErrors: true)
+                self.noticeMessage = "Review finished. Check the findings before approving picture lock."
+            } catch {
+                self.errorMessage = error.localizedDescription
+                await self.reloadCurrentProject(reportErrors: false)
+            }
         }
     }
 
     func recover() {
-        guard let runManifest = snapshot?.runManifest else {
+        guard !isBusy, let runManifest = snapshot?.runManifest else {
             errorMessage = StudioError.noProject.localizedDescription
             return
         }
         let filmToolExecutable = filmToolExecutable
-        perform("Recovering interrupted work…") {
-            _ = try await FilmToolClient(executable: filmToolExecutable).recover(runManifest: runManifest)
+        beginActivity("Recovering interrupted work…")
+        commandTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            defer { self.endActivity() }
+            do {
+                try await FilmStudioService.recover(
+                    runManifest: runManifest,
+                    filmToolExecutable: filmToolExecutable
+                )
+                await self.reloadCurrentProject(reportErrors: true)
+                self.noticeMessage = "Interrupted work was recovered."
+            } catch {
+                self.errorMessage = error.localizedDescription
+            }
         }
     }
 
     func importPlayableCut(into editor: EditorViewModel) {
-        guard let cutURL = snapshot?.playableCutURL else {
+        guard !isBusy else { return }
+        guard let cutURL = playableCutURL else {
             errorMessage = StudioError.noPlayableCut.localizedDescription
             return
         }
-        perform("Importing cut into Palmier…", refreshAfterward: false) { [weak self, weak editor] in
-            guard let editor else { throw StudioError.noPalmierProject }
-            let summary = try await editor.importFinderItems([cutURL], into: editor.mediaPanelCurrentFolderId, finalize: true)
-            guard summary.assetCount > 0 else { throw StudioError.importRejected }
-            self?.noticeMessage = "Imported \(cutURL.lastPathComponent) into Palmier."
+        beginActivity("Importing cut into Palmier…")
+        commandTask = Task { @MainActor [weak self, weak editor] in
+            guard let self else { return }
+            defer { self.endActivity() }
+            do {
+                guard let editor else { throw StudioError.noPalmierProject }
+                let summary = try await editor.importFinderItems(
+                    [cutURL],
+                    into: editor.mediaPanelCurrentFolderId,
+                    finalize: true
+                )
+                guard summary.assetCount > 0 else { throw StudioError.importRejected }
+                self.noticeMessage = "Imported \(cutURL.lastPathComponent) into the active Palmier project."
+            } catch {
+                self.errorMessage = error.localizedDescription
+            }
         }
     }
 
     func revealPlayableCut() {
-        guard let cutURL = snapshot?.playableCutURL else {
+        guard let cutURL = playableCutURL else {
             errorMessage = StudioError.noPlayableCut.localizedDescription
             return
         }
@@ -300,51 +431,99 @@ final class PalmierFilmStudioModel: ObservableObject {
         noticeMessage = nil
     }
 
-    private func perform(
-        _ description: String,
-        refreshAfterward: Bool = true,
-        operation: @escaping @MainActor () async throws -> Void
+    func displayName(_ value: String) -> String {
+        value.replacingOccurrences(of: "-", with: " ").capitalized
+    }
+
+    private func runSetupRepair(
+        activity: String,
+        success: String,
+        operation: @escaping @Sendable () async throws -> Void
     ) {
         guard !isBusy else { return }
+        beginActivity(activity)
+        commandTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            defer { self.endActivity() }
+            do {
+                try await operation()
+                await self.refreshRuntime()
+                self.noticeMessage = success
+            } catch {
+                self.errorMessage = error.localizedDescription
+                await self.refreshRuntime()
+            }
+        }
+    }
+
+    private func beginActivity(_ description: String) {
         isBusy = true
         activity = description
         errorMessage = nil
         noticeMessage = nil
-        commandTask?.cancel()
-        commandTask = Task { @MainActor [weak self] in
+    }
+
+    private func endActivity() {
+        isBusy = false
+        activity = ""
+        commandTask = nil
+    }
+
+    private func applyLoadedProject(_ loaded: FilmStudioLoadedProject) {
+        let rootChanged = watchedRoot?.standardizedFileURL != loaded.snapshot.root.standardizedFileURL
+        snapshot = loaded.snapshot
+        playableCutURL = loaded.playableCutURL
+        UserDefaults.standard.set(loaded.snapshot.runManifest.path, forKey: Keys.lastRunManifest)
+        if rootChanged {
+            installWatcher(root: loaded.snapshot.root)
+        }
+    }
+
+    private func installWatcher(root: URL) {
+        watcherTask?.cancel()
+        watcher = nil
+        watchedRoot = root.standardizedFileURL
+        watcherTask = Task { @MainActor [weak self] in
             guard let self else { return }
-            defer {
-                self.isBusy = false
-                self.activity = ""
+            let watcher = await FilmStudioService.makeWatcher(root: root) { [weak self] in
+                Task { @MainActor in
+                    self?.workspaceDidChange(root: root)
+                }
             }
+            guard !Task.isCancelled,
+                  self.watchedRoot?.standardizedFileURL == root.standardizedFileURL else { return }
+            self.watcher = watcher
+        }
+    }
+
+    private func workspaceDidChange(root: URL) {
+        guard !isBusy,
+              snapshot?.root.standardizedFileURL == root.standardizedFileURL else { return }
+        refreshDebounceTask?.cancel()
+        refreshDebounceTask = Task { @MainActor [weak self] in
             do {
-                try await operation()
-                if refreshAfterward { self.refreshProject() }
-            } catch is CancellationError {
-                return
+                try await Task.sleep(for: .milliseconds(250))
             } catch {
-                self.errorMessage = error.localizedDescription
+                return
             }
+            guard !Task.isCancelled else { return }
+            await self?.reloadCurrentProject(reportErrors: false)
         }
     }
 
-    private func resolvedDependency(id: String, label: String, value: String) -> (row: RuntimeDependency, url: URL?) {
+    private func reloadCurrentProject(reportErrors: Bool) async {
+        guard let runManifest = snapshot?.runManifest else { return }
         do {
-            let url = try FilmToolClient.resolveExecutable(value)
-            return (.init(id: id, label: label, available: true, detail: url.path), url)
+            let loaded = try await FilmStudioService.loadProject(runManifest: runManifest)
+            guard snapshot?.runManifest.standardizedFileURL == runManifest.standardizedFileURL else { return }
+            applyLoadedProject(loaded)
         } catch {
-            return (.init(id: id, label: label, available: false, detail: error.localizedDescription), nil)
+            if reportErrors { errorMessage = error.localizedDescription }
         }
     }
 
-    private static func resolveAgentContext(
-        piExecutable: String,
-        mereRunExecutable: String
-    ) async throws -> (pi: URL, model: MereRunAgentModel) {
-        let pi = try PiExecutableResolver.resolve(piExecutable)
-        let mereRun = try FilmToolClient.resolveExecutable(mereRunExecutable)
-        let status = try await MereRunAgentClient(executable: mereRun.path).status()
-        guard let model = status.bestInstalledModel else { throw StudioError.noInstalledAgentModel }
-        return (pi, model)
+    private func copyToPasteboard(_ value: String) {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(value, forType: .string)
     }
 }
