@@ -23,7 +23,7 @@ final class PalmierFilmStudioModel: ObservableObject {
             case .importRejected:
                 "Palmier did not import the GRACE cut. Check that the generated file is a supported media type."
             case .setupIncomplete:
-                "Finish Film Studio setup before starting or advancing a production."
+                "Finish the setup required for this Film Studio action, then retry."
             }
         }
     }
@@ -113,44 +113,70 @@ final class PalmierFilmStudioModel: ObservableObject {
         return snapshot.project.production.mode == "plan" || productionModelReadinessBlocked
     }
 
+    var hasPendingReviewRequests: Bool {
+        snapshot?.project.reviewRequests.isEmpty == false
+    }
+
     var needsHumanReviewDecision: Bool {
-        guard pendingGate == "picture-lock", let proof = snapshot?.project.proof else { return false }
+        guard pendingGate == "picture-lock",
+              !hasPendingReviewRequests,
+              let proof = snapshot?.project.proof else { return false }
         return proof.review && !proof.humanReview
     }
 
+    var planningReady: Bool { runtime?.planningReady == true }
+    var agentReady: Bool { runtime?.agentReady == true }
     var productionReady: Bool { runtime?.productionReady == true }
-    var canCreateFilm: Bool { productionReady && !isBusy }
+    var canCreateFilm: Bool { planningReady && !isBusy }
+
     var canApprove: Bool {
-        snapshot != nil
-            && pendingGate != nil
-            && !briefNeedsInput
-            && !productionNeedsConfiguration
-            && !needsHumanReviewDecision
-            && runtime?.filmToolsReady == true
-            && !isBusy
+        guard snapshot != nil,
+              let gate = pendingGate,
+              !briefNeedsInput,
+              runtime?.filmToolsReady == true,
+              !isBusy else { return false }
+
+        switch gate {
+        case "production":
+            return !productionNeedsConfiguration && productionReady
+        case "picture-lock":
+            return snapshot?.project.proof.humanReview == true && !hasPendingReviewRequests
+        default:
+            return true
+        }
     }
+
     var canAdvance: Bool {
-        snapshot != nil
-            && pendingGate == nil
-            && productionReady
-            && !isCompleted
-            && !isBusy
+        guard snapshot != nil,
+              pendingGate == nil,
+              !isCompleted,
+              !isBusy else { return false }
+        return nextAdvanceNeedsMediaRuntime ? productionReady : agentReady
     }
+
     var canReview: Bool {
-        snapshot != nil
-            && playableCutURL != nil
+        guard let proof = snapshot?.project.proof else { return false }
+        return playableCutURL != nil
+            && proof.assembly
+            && !proof.review
             && productionReady
             && !isCompleted
             && !isBusy
     }
+
     var canReroll: Bool {
         snapshot != nil
             && runtime?.filmToolsReady == true
             && !isCompleted
             && !isBusy
     }
+
     var hasInterruptedWork: Bool {
         snapshot?.project.jobs.contains { $0.status == "running" } == true
+    }
+
+    private var nextAdvanceNeedsMediaRuntime: Bool {
+        snapshot?.project.approvals["production"]?.status == "approved"
     }
 
     var effectiveNewFilmTitle: String {
@@ -196,6 +222,7 @@ final class PalmierFilmStudioModel: ObservableObject {
     }
 
     func chooseNewFilmDirectory() {
+        guard !isBusy else { return }
         let panel = NSOpenPanel()
         panel.title = "Choose Film Location"
         panel.canChooseDirectories = true
@@ -247,11 +274,10 @@ final class PalmierFilmStudioModel: ObservableObject {
     func refreshRuntime() async {
         guard !isRuntimeRefreshing else { return }
         isRuntimeRefreshing = true
-        let status = await FilmStudioService.inspectRuntime(
+        runtime = await FilmStudioService.inspectRuntime(
             filmToolExecutable: filmToolExecutable,
             mereRunExecutable: mereRunExecutable
         )
-        runtime = status
         isRuntimeRefreshing = false
     }
 
@@ -274,6 +300,22 @@ final class PalmierFilmStudioModel: ObservableObject {
             success: "Pi is installed."
         ) {
             try await FilmStudioService.installPi(mereRunExecutable: mereRunExecutable)
+        }
+    }
+
+    func configurePiProvider() {
+        guard !isBusy,
+              runtime?.mereRunReady == true,
+              let modelID = runtime?.selectedAgentModel?.id else { return }
+        let mereRunExecutable = mereRunExecutable
+        runSetupRepair(
+            activity: "Configuring Pi for mere.run…",
+            success: "Pi is configured for the selected local agent model."
+        ) {
+            try await FilmStudioService.configurePiProvider(
+                mereRunExecutable: mereRunExecutable,
+                modelID: modelID
+            )
         }
     }
 
@@ -474,7 +516,9 @@ final class PalmierFilmStudioModel: ObservableObject {
                     filmToolExecutable: filmToolExecutable
                 )
                 await self.reloadCurrentProject(reportErrors: true)
-                self.noticeMessage = "Approved \(self.displayName(gate)). You can continue production."
+                self.noticeMessage = self.isCompleted
+                    ? "Film completed. The verified master is ready for Palmier."
+                    : "Approved \(self.displayName(gate)). You can continue production."
             } catch {
                 self.errorMessage = error.localizedDescription
             }
@@ -482,7 +526,10 @@ final class PalmierFilmStudioModel: ObservableObject {
     }
 
     func advance() {
-        guard canAdvance, let runManifest = snapshot?.runManifest else { return }
+        guard canAdvance, let runManifest = snapshot?.runManifest else {
+            errorMessage = StudioError.setupIncomplete.localizedDescription
+            return
+        }
         let filmToolExecutable = filmToolExecutable
         let mereRunExecutable = mereRunExecutable
         beginActivity("Continuing production…")
@@ -511,7 +558,10 @@ final class PalmierFilmStudioModel: ObservableObject {
     }
 
     func runReview() {
-        guard canReview, let runManifest = snapshot?.runManifest else { return }
+        guard canReview, let runManifest = snapshot?.runManifest else {
+            errorMessage = StudioError.setupIncomplete.localizedDescription
+            return
+        }
         let filmToolExecutable = filmToolExecutable
         let mereRunExecutable = mereRunExecutable
         beginActivity("Reviewing film…")
