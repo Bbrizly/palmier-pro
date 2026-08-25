@@ -43,26 +43,21 @@ struct FilmStudioWorkspaceView: View {
     @State private var showingNewFilm = false
     @State private var showingBrief = false
     @State private var showingProductionSettings = false
+    @State private var showingHumanReview = false
     @State private var rerollShot: FilmProductionShot?
 
     var body: some View {
         HStack(spacing: AppTheme.Spacing.zero) {
             sidebar
                 .frame(width: AppTheme.Settings.sidebarWidth)
-            Rectangle()
-                .fill(AppTheme.Border.primaryColor)
-                .frame(width: AppTheme.BorderWidth.hairline)
+            divider(width: AppTheme.BorderWidth.hairline)
             VStack(spacing: AppTheme.Spacing.zero) {
                 header
-                Rectangle()
-                    .fill(AppTheme.Border.primaryColor)
-                    .frame(height: AppTheme.BorderWidth.hairline)
+                divider(height: AppTheme.BorderWidth.hairline)
                 messageArea
                 detail
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
-                Rectangle()
-                    .fill(AppTheme.Border.primaryColor)
-                    .frame(height: AppTheme.BorderWidth.hairline)
+                divider(height: AppTheme.BorderWidth.hairline)
                 actionBar
             }
         }
@@ -75,6 +70,9 @@ struct FilmStudioWorkspaceView: View {
         }
         .sheet(isPresented: $showingProductionSettings) {
             ProductionSettingsSheet(model: model)
+        }
+        .sheet(isPresented: $showingHumanReview) {
+            HumanReviewSheet(model: model)
         }
         .sheet(item: $rerollShot) { shot in
             RerollShotSheet(model: model, shot: shot)
@@ -113,9 +111,7 @@ struct FilmStudioWorkspaceView: View {
                                     .accessibilityLabel("Setup required")
                             }
                         }
-                        .foregroundStyle(
-                            section == item ? AppTheme.Text.primaryColor : AppTheme.Text.secondaryColor
-                        )
+                        .foregroundStyle(section == item ? AppTheme.Text.primaryColor : AppTheme.Text.secondaryColor)
                         .padding(.horizontal, AppTheme.Spacing.mdLg)
                         .padding(.vertical, AppTheme.Spacing.smMd)
                         .frame(maxWidth: .infinity, alignment: .leading)
@@ -133,21 +129,19 @@ struct FilmStudioWorkspaceView: View {
 
             Spacer(minLength: AppTheme.Spacing.lg)
 
-            if let snapshot = model.snapshot {
+            if let project = model.snapshot?.project {
                 VStack(alignment: .leading, spacing: AppTheme.Spacing.xs) {
-                    Text(verbatim: snapshot.project.title)
+                    Text(verbatim: project.title)
                         .font(.system(size: AppTheme.FontSize.smMd, weight: AppTheme.FontWeight.medium))
                         .foregroundStyle(AppTheme.Text.primaryColor)
                         .lineLimit(2)
-                    Text(verbatim: "\(model.displayName(snapshot.project.phase)) · \(model.displayName(snapshot.project.status))")
+                    Text(verbatim: "\(model.displayName(project.phase)) · \(model.displayName(project.status))")
                         .font(.system(size: AppTheme.FontSize.sm))
                         .foregroundStyle(AppTheme.Text.tertiaryColor)
-                    Button("Close Film") {
-                        model.closeProject()
-                    }
-                    .buttonStyle(.plain)
-                    .foregroundStyle(AppTheme.Text.tertiaryColor)
-                    .disabled(model.isBusy)
+                    Button("Close Film") { model.closeProject() }
+                        .buttonStyle(.plain)
+                        .foregroundStyle(AppTheme.Text.tertiaryColor)
+                        .disabled(model.isBusy)
                 }
                 .padding(AppTheme.Spacing.lgXl)
             }
@@ -168,25 +162,22 @@ struct FilmStudioWorkspaceView: View {
             }
             Spacer(minLength: AppTheme.Spacing.lg)
             if model.isBusy {
-                ProgressView()
-                    .controlSize(.small)
+                ProgressView().controlSize(.small)
                 Text(verbatim: model.activity)
                     .font(.system(size: AppTheme.FontSize.sm))
                     .foregroundStyle(AppTheme.Text.tertiaryColor)
             }
-            Button("Open Film…") {
-                model.chooseProject()
-            }
-            .disabled(model.isBusy)
+            Button("Open Film…") { model.chooseProject() }
+                .disabled(model.isBusy)
             Button("New Film") {
-                if model.productionReady {
+                if model.planningReady {
                     showingNewFilm = true
                 } else {
                     section = .setup
                 }
             }
             .buttonStyle(.borderedProminent)
-            .help(model.productionReady ? "Create a new GRACE film" : "Finish Film Studio setup first")
+            .help(model.planningReady ? "Create a new GRACE film" : "Install mere.run and Film Studio tools first")
             .disabled(model.isBusy)
         }
         .padding(.horizontal, AppTheme.Spacing.xl)
@@ -195,35 +186,27 @@ struct FilmStudioWorkspaceView: View {
     }
 
     private var headerSubtitle: String {
-        guard let project = model.snapshot?.project else {
-            return model.productionReady
-                ? "Local production is ready"
-                : "Open an existing film, or finish setup to create one"
+        if let project = model.snapshot?.project {
+            return "\(project.title) · \(model.displayName(project.phase))"
         }
-        return "\(project.title) · \(model.displayName(project.phase))"
+        if model.productionReady { return "Local production is ready" }
+        if model.agentReady { return "Story agents are ready; media setup can be finished before rendering" }
+        if model.planningReady { return "Planning is ready; finish agent setup before advancing" }
+        return "Open an existing film, or install the two planning tools to start one"
     }
 
     @ViewBuilder
     private var messageArea: some View {
         if let error = model.errorMessage {
-            messageBanner(
-                error,
-                symbol: "exclamationmark.triangle.fill",
-                color: AppTheme.Status.errorColor
-            )
+            messageBanner(error, symbol: "exclamationmark.triangle.fill", color: AppTheme.Status.errorColor)
         } else if let notice = model.noticeMessage {
-            messageBanner(
-                notice,
-                symbol: "checkmark.circle.fill",
-                color: AppTheme.Status.successColor
-            )
+            messageBanner(notice, symbol: "checkmark.circle.fill", color: AppTheme.Status.successColor)
         }
     }
 
     private func messageBanner(_ text: String, symbol: String, color: Color) -> some View {
         HStack(alignment: .top, spacing: AppTheme.Spacing.smMd) {
-            Image(systemName: symbol)
-                .foregroundStyle(color)
+            Image(systemName: symbol).foregroundStyle(color)
             Text(verbatim: text)
                 .font(.system(size: AppTheme.FontSize.smMd))
                 .foregroundStyle(AppTheme.Text.primaryColor)
@@ -244,28 +227,19 @@ struct FilmStudioWorkspaceView: View {
 
     @ViewBuilder
     private var detail: some View {
-        switch section {
-        case .setup:
+        if section == .setup {
             setupView
-        default:
-            if let snapshot = model.snapshot {
-                switch section {
-                case .studio:
-                    studioView(snapshot)
-                case .development:
-                    developmentView(snapshot)
-                case .shots:
-                    shotsView(snapshot)
-                case .review:
-                    reviewView(snapshot)
-                case .delivery:
-                    deliveryView(snapshot)
-                case .setup:
-                    EmptyView()
-                }
-            } else {
-                emptyProjectView
+        } else if let snapshot = model.snapshot {
+            switch section {
+            case .studio: studioView(snapshot)
+            case .development: developmentView(snapshot)
+            case .shots: shotsView(snapshot)
+            case .review: reviewView(snapshot)
+            case .delivery: deliveryView(snapshot)
+            case .setup: EmptyView()
             }
+        } else {
+            emptyProjectView
         }
     }
 
@@ -278,17 +252,17 @@ struct FilmStudioWorkspaceView: View {
                 Text(verbatim: "No film open")
                     .font(.system(size: AppTheme.FontSize.xl, weight: AppTheme.FontWeight.semibold))
                     .foregroundStyle(AppTheme.Text.primaryColor)
-                Text(verbatim: "Open any GRACE run.json to inspect it. Creating and advancing films requires local production setup.")
+                Text(verbatim: model.planningReady
+                    ? "Start with an idea now. Film Studio will ask for the remaining local setup only when the workflow reaches an agent or render step."
+                    : "Open any GRACE run.json to inspect it. New films only require mere.run and Film Studio tools to begin planning.")
                     .font(.system(size: AppTheme.FontSize.md))
                     .foregroundStyle(AppTheme.Text.tertiaryColor)
                     .multilineTextAlignment(.center)
             }
             HStack(spacing: AppTheme.Spacing.smMd) {
-                Button("Open Film…") {
-                    model.chooseProject()
-                }
-                Button(model.productionReady ? "New Film" : "Finish Setup") {
-                    if model.productionReady {
+                Button("Open Film…") { model.chooseProject() }
+                Button(model.planningReady ? "New Film" : "Finish Setup") {
+                    if model.planningReady {
                         showingNewFilm = true
                     } else {
                         section = .setup
@@ -313,9 +287,9 @@ struct FilmStudioWorkspaceView: View {
                             Image(systemName: "wrench.and.screwdriver")
                                 .foregroundStyle(AppTheme.Status.warningColor)
                             VStack(alignment: .leading, spacing: AppTheme.Spacing.xxs) {
-                                Text(verbatim: "Production setup needs attention")
+                                Text(verbatim: "Some production setup is still optional or missing")
                                     .font(.system(size: AppTheme.FontSize.md, weight: AppTheme.FontWeight.medium))
-                                Text(verbatim: "You can still inspect this film and import completed cuts.")
+                                Text(verbatim: "Film Studio only blocks the step that actually needs it. Existing cuts remain playable and importable.")
                                     .font(.system(size: AppTheme.FontSize.sm))
                                     .foregroundStyle(AppTheme.Text.tertiaryColor)
                             }
@@ -381,27 +355,6 @@ struct FilmStudioWorkspaceView: View {
         }
     }
 
-    private func metric(_ title: String, _ value: String, _ symbol: String) -> some View {
-        VStack(alignment: .leading, spacing: AppTheme.Spacing.smMd) {
-            Image(systemName: symbol)
-                .font(.system(size: AppTheme.FontSize.lg))
-                .foregroundStyle(AppTheme.Text.tertiaryColor)
-            Text(verbatim: value)
-                .font(.system(size: AppTheme.FontSize.title1, weight: AppTheme.FontWeight.semibold))
-                .foregroundStyle(AppTheme.Text.primaryColor)
-                .lineLimit(1)
-            Text(verbatim: title)
-                .font(.system(size: AppTheme.FontSize.sm))
-                .foregroundStyle(AppTheme.Text.tertiaryColor)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(AppTheme.Spacing.lg)
-        .background(
-            AppTheme.Background.raisedColor,
-            in: RoundedRectangle(cornerRadius: AppTheme.Radius.md)
-        )
-    }
-
     private func developmentView(_ snapshot: FilmWorkspaceSnapshot) -> some View {
         ScrollView {
             VStack(alignment: .leading, spacing: AppTheme.Spacing.lgXl) {
@@ -412,11 +365,9 @@ struct FilmStudioWorkspaceView: View {
                                 Label(question, systemImage: "questionmark.circle")
                                     .foregroundStyle(AppTheme.Text.secondaryColor)
                             }
-                            Button("Complete Brief…") {
-                                showingBrief = true
-                            }
-                            .buttonStyle(.borderedProminent)
-                            .disabled(model.isBusy)
+                            Button("Complete Brief…") { showingBrief = true }
+                                .buttonStyle(.borderedProminent)
+                                .disabled(model.isBusy)
                         }
                     }
                 }
@@ -468,56 +419,23 @@ struct FilmStudioWorkspaceView: View {
                 if snapshot.productionPlan != nil {
                     FilmStudioCard(title: "Production execution") {
                         VStack(alignment: .leading, spacing: AppTheme.Spacing.smMd) {
-                            HStack {
-                                Text(verbatim: "Mode")
-                                    .foregroundStyle(AppTheme.Text.tertiaryColor)
-                                Spacer(minLength: AppTheme.Spacing.md)
-                                Text(verbatim: model.displayName(snapshot.project.production.mode))
-                                    .font(.system(size: AppTheme.FontSize.smMd, weight: AppTheme.FontWeight.medium))
-                            }
-                            HStack {
-                                Text(verbatim: "Takes per shot")
-                                    .foregroundStyle(AppTheme.Text.tertiaryColor)
-                                Spacer(minLength: AppTheme.Spacing.md)
-                                Text(verbatim: String(snapshot.project.production.takesPerShot))
-                                    .font(.system(size: AppTheme.FontSize.smMd, weight: AppTheme.FontWeight.medium))
-                            }
+                            valueRow("Mode", model.displayName(snapshot.project.production.mode))
+                            valueRow("Takes per shot", String(snapshot.project.production.takesPerShot))
                             if model.pendingGate == "production" {
-                                Button(model.productionNeedsConfiguration ? "Configure & Check Models…" : "Change Production Settings…") {
-                                    showingProductionSettings = true
+                                if model.productionNeedsConfiguration {
+                                    Button("Configure & Check Models…") { showingProductionSettings = true }
+                                        .buttonStyle(.borderedProminent)
+                                        .disabled(model.isBusy || !model.productionReady)
+                                } else {
+                                    Button("Change Production Settings…") { showingProductionSettings = true }
+                                        .disabled(model.isBusy || !model.productionReady)
                                 }
-                                .buttonStyle(model.productionNeedsConfiguration ? .borderedProminent : .bordered)
-                                .disabled(model.isBusy || model.runtime?.filmToolsReady != true)
                             }
                         }
                     }
                 }
             }
             .padding(AppTheme.Spacing.xl)
-        }
-    }
-
-    private func optionalField(_ label: String, _ value: String?) -> some View {
-        field(label, normalized(value))
-    }
-
-    private func normalized(_ value: String?) -> String {
-        guard let value,
-              !value.isEmpty,
-              value.lowercased() != "unspecified" else { return "Not set" }
-        return value
-    }
-
-    private func field(_ label: String, _ text: String) -> some View {
-        VStack(alignment: .leading, spacing: AppTheme.Spacing.xs) {
-            Text(verbatim: label)
-                .font(.system(size: AppTheme.FontSize.sm, weight: AppTheme.FontWeight.semibold))
-                .foregroundStyle(AppTheme.Text.tertiaryColor)
-            Text(verbatim: text)
-                .font(.system(size: AppTheme.FontSize.md))
-                .foregroundStyle(AppTheme.Text.primaryColor)
-                .textSelection(.enabled)
-                .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
 
@@ -554,10 +472,8 @@ struct FilmStudioWorkspaceView: View {
                                 }
                                 Spacer(minLength: AppTheme.Spacing.md)
                                 if state?.take != nil {
-                                    Button("Reroll…") {
-                                        rerollShot = shot
-                                    }
-                                    .disabled(!model.canReroll)
+                                    Button("Reroll…") { rerollShot = shot }
+                                        .disabled(!model.canReroll)
                                 }
                             }
                             .font(.system(size: AppTheme.FontSize.sm))
@@ -586,15 +502,34 @@ struct FilmStudioWorkspaceView: View {
                 if model.playableCutURL != nil {
                     FilmStudioCard(title: "Current cut") {
                         HStack(spacing: AppTheme.Spacing.smMd) {
-                            Button("Play Cut") {
-                                model.openPlayableCut()
+                            Button("Play Cut") { model.openPlayableCut() }
+                            if model.canReview {
+                                Button("Run Independent Review") { model.runReview() }
+                                    .buttonStyle(.borderedProminent)
                             }
-                            Button("Run Review") {
-                                model.runReview()
-                            }
-                            .buttonStyle(.borderedProminent)
-                            .disabled(!model.canReview)
                         }
+                    }
+                }
+
+                if model.needsHumanReviewDecision {
+                    FilmStudioCard(title: "Your review") {
+                        VStack(alignment: .leading, spacing: AppTheme.Spacing.smMd) {
+                            Text(verbatim: "Independent review is complete. Watch the current cut, then either approve this exact version for picture lock or request specific shot revisions.")
+                                .foregroundStyle(AppTheme.Text.secondaryColor)
+                            Button("Review & Decide…") { showingHumanReview = true }
+                                .buttonStyle(.borderedProminent)
+                                .disabled(model.isBusy)
+                        }
+                    }
+                } else if snapshot.project.proof.humanReview {
+                    FilmStudioCard(title: "Your review") {
+                        Label("Human review is recorded against this exact cut. Picture lock is eligible for approval.", systemImage: "checkmark.seal.fill")
+                            .foregroundStyle(AppTheme.Status.successColor)
+                    }
+                } else if model.hasPendingReviewRequests {
+                    FilmStudioCard(title: "Revisions requested") {
+                        Text(verbatim: "Prepare each requested reroll below. GRACE invalidates the previous review evidence when the cut changes, so the revised cut will be reviewed again before picture lock.")
+                            .foregroundStyle(AppTheme.Text.secondaryColor)
                     }
                 }
 
@@ -634,17 +569,25 @@ struct FilmStudioWorkspaceView: View {
                     } else {
                         VStack(spacing: AppTheme.Spacing.zero) {
                             ForEach(snapshot.project.reviewRequests) { request in
-                                VStack(alignment: .leading, spacing: AppTheme.Spacing.xs) {
-                                    HStack {
-                                        Text(verbatim: request.shotId)
-                                            .font(.system(size: AppTheme.FontSize.sm, weight: AppTheme.FontWeight.semibold, design: .monospaced))
-                                        Spacer(minLength: AppTheme.Spacing.md)
-                                        Text(verbatim: model.displayName(request.status))
-                                            .font(.system(size: AppTheme.FontSize.sm))
-                                            .foregroundStyle(AppTheme.Text.tertiaryColor)
+                                HStack(alignment: .top, spacing: AppTheme.Spacing.smMd) {
+                                    VStack(alignment: .leading, spacing: AppTheme.Spacing.xs) {
+                                        HStack {
+                                            Text(verbatim: request.shotId)
+                                                .font(.system(size: AppTheme.FontSize.sm, weight: AppTheme.FontWeight.semibold, design: .monospaced))
+                                            Text(verbatim: model.displayName(request.status))
+                                                .font(.system(size: AppTheme.FontSize.sm))
+                                                .foregroundStyle(AppTheme.Text.tertiaryColor)
+                                        }
+                                        Text(verbatim: request.note)
+                                            .foregroundStyle(AppTheme.Text.secondaryColor)
                                     }
-                                    Text(verbatim: request.note)
-                                        .foregroundStyle(AppTheme.Text.secondaryColor)
+                                    Spacer(minLength: AppTheme.Spacing.md)
+                                    if request.status == "pending" {
+                                        Button("Prepare Reroll") {
+                                            model.reroll(shotID: request.shotId, note: request.note)
+                                        }
+                                        .disabled(!model.canReroll)
+                                    }
                                 }
                                 .padding(.vertical, AppTheme.Spacing.smMd)
                             }
@@ -670,17 +613,11 @@ struct FilmStudioWorkspaceView: View {
                                 .textSelection(.enabled)
                                 .lineLimit(2)
                             HStack(spacing: AppTheme.Spacing.smMd) {
-                                Button("Import Cut into Palmier") {
-                                    bridge.importPlayableCut(using: model)
-                                }
-                                .buttonStyle(.borderedProminent)
-                                .disabled(model.isBusy)
-                                Button("Play Cut") {
-                                    model.openPlayableCut()
-                                }
-                                Button("Reveal in Finder") {
-                                    model.revealPlayableCut()
-                                }
+                                Button("Import Cut into Palmier") { bridge.importPlayableCut(using: model) }
+                                    .buttonStyle(.borderedProminent)
+                                    .disabled(model.isBusy)
+                                Button("Play Cut") { model.openPlayableCut() }
+                                Button("Reveal in Finder") { model.revealPlayableCut() }
                             }
                             Text(verbatim: "Import uses Palmier's normal media pipeline and targets the currently active Palmier project.")
                                 .font(.system(size: AppTheme.FontSize.sm))
@@ -711,28 +648,12 @@ struct FilmStudioWorkspaceView: View {
         }
     }
 
-    private func proof(_ label: String, _ value: Bool) -> some View {
-        HStack(spacing: AppTheme.Spacing.smMd) {
-            Image(systemName: value ? "checkmark.circle.fill" : "circle")
-                .foregroundStyle(value ? AppTheme.Status.successColor : AppTheme.Text.mutedColor)
-            Text(verbatim: label)
-                .foregroundStyle(AppTheme.Text.primaryColor)
-            Spacer(minLength: AppTheme.Spacing.md)
-            Text(verbatim: value ? "Passed" : "Pending")
-                .font(.system(size: AppTheme.FontSize.sm))
-                .foregroundStyle(AppTheme.Text.tertiaryColor)
-        }
-        .padding(.vertical, AppTheme.Spacing.xs)
-    }
-
     private var setupView: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: AppTheme.Spacing.lgXl) {
-                FilmStudioCard(title: model.productionReady ? "Ready to create" : "Finish local setup") {
+                FilmStudioCard(title: setupTitle) {
                     VStack(alignment: .leading, spacing: AppTheme.Spacing.smMd) {
-                        Text(verbatim: model.productionReady
-                            ? "GRACE can create, advance, review, and deliver films entirely on this Mac."
-                            : "Existing films remain readable. Complete the missing requirements below to create or advance productions.")
+                        Text(verbatim: setupSummary)
                             .foregroundStyle(AppTheme.Text.secondaryColor)
                         if model.isRuntimeRefreshing {
                             HStack(spacing: AppTheme.Spacing.smMd) {
@@ -770,6 +691,20 @@ struct FilmStudioWorkspaceView: View {
                                 action: !runtime.piReady && runtime.mereRunReady ? model.installPi : nil
                             )
                             setupRow(
+                                title: "Local agent model",
+                                detail: agentModelDetail(runtime),
+                                ready: runtime.agentModelReady,
+                                actionTitle: !runtime.agentModelReady && runtime.mereRunReady ? "Copy Setup Command" : nil,
+                                action: !runtime.agentModelReady && runtime.mereRunReady ? model.copyModelSetupCommand : nil
+                            )
+                            setupRow(
+                                title: "Pi mere-run provider",
+                                detail: providerDetail(runtime),
+                                ready: runtime.providerReady,
+                                actionTitle: runtime.agentModelReady && !runtime.providerReady ? "Configure" : nil,
+                                action: runtime.agentModelReady && !runtime.providerReady ? model.configurePiProvider : nil
+                            )
+                            setupRow(
                                 title: "FFmpeg",
                                 detail: runtime.doctor?.check(named: "ffmpeg")?.detail ?? "Waiting for Film Studio tools",
                                 ready: runtime.ffmpegReady,
@@ -781,14 +716,13 @@ struct FilmStudioWorkspaceView: View {
                                 detail: runtime.doctor?.check(named: "ffprobe")?.detail ?? "Waiting for Film Studio tools",
                                 ready: runtime.ffprobeReady
                             )
-                            setupRow(
-                                title: "Local agent model",
-                                detail: agentModelDetail(runtime),
-                                ready: runtime.agentModelReady,
-                                actionTitle: !runtime.agentModelReady && runtime.mereRunReady ? "Copy Setup Command" : nil,
-                                action: !runtime.agentModelReady && runtime.mereRunReady ? model.copyModelSetupCommand : nil
-                            )
                         }
+                    }
+
+                    FilmStudioCard(title: "Local agent server") {
+                        Text(verbatim: "Agent steps use the configured Pi provider on loopback. Palmier reuses a healthy server already running there; otherwise it starts the selected local model for the operation and owns that process until Palmier exits. Non-loopback providers are never auto-started.")
+                            .font(.system(size: AppTheme.FontSize.sm))
+                            .foregroundStyle(AppTheme.Text.tertiaryColor)
                     }
 
                     if let error = runtime.agentError ?? runtime.doctorError {
@@ -804,31 +738,15 @@ struct FilmStudioWorkspaceView: View {
                 FilmStudioCard(title: "Advanced") {
                     DisclosureGroup("Executable overrides") {
                         VStack(alignment: .leading, spacing: AppTheme.Spacing.md) {
-                            VStack(alignment: .leading, spacing: AppTheme.Spacing.xs) {
-                                Text(verbatim: "mere.run")
-                                    .font(.system(size: AppTheme.FontSize.sm))
-                                    .foregroundStyle(AppTheme.Text.tertiaryColor)
-                                TextField("Auto-detect", text: $model.mereRunOverride)
-                                    .textFieldStyle(.roundedBorder)
-                            }
-                            VStack(alignment: .leading, spacing: AppTheme.Spacing.xs) {
-                                Text(verbatim: "mere-film-tools")
-                                    .font(.system(size: AppTheme.FontSize.sm))
-                                    .foregroundStyle(AppTheme.Text.tertiaryColor)
-                                TextField("Auto-detect", text: $model.filmToolOverride)
-                                    .textFieldStyle(.roundedBorder)
-                            }
+                            executableOverride("mere.run", text: $model.mereRunOverride)
+                            executableOverride("mere-film-tools", text: $model.filmToolOverride)
                             HStack(spacing: AppTheme.Spacing.smMd) {
                                 Button("Recheck") {
-                                    Task { @MainActor in
-                                        await model.refreshRuntime()
-                                    }
+                                    Task { @MainActor in await model.refreshRuntime() }
                                 }
                                 .disabled(model.isRuntimeRefreshing || model.isBusy)
-                                Button("Use Automatic Paths") {
-                                    model.resetExecutableOverrides()
-                                }
-                                .disabled(model.isBusy)
+                                Button("Use Automatic Paths") { model.resetExecutableOverrides() }
+                                    .disabled(model.isBusy)
                             }
                         }
                         .padding(.top, AppTheme.Spacing.md)
@@ -837,6 +755,146 @@ struct FilmStudioWorkspaceView: View {
             }
             .padding(AppTheme.Spacing.xl)
         }
+    }
+
+    private var setupTitle: String {
+        if model.productionReady { return "Production ready" }
+        if model.agentReady { return "Finish media setup" }
+        if model.planningReady { return "Finish agent setup" }
+        return "Install planning tools"
+    }
+
+    private var setupSummary: String {
+        if model.productionReady {
+            return "GRACE can plan, run local agents, render, review, and deliver films on this Mac."
+        }
+        if model.agentReady {
+            return "Planning and story agents are ready. Install the remaining media tools before production rendering and review."
+        }
+        if model.planningReady {
+            return "You can create and complete a film brief now. Pi, a local agent model, and its provider are required when the story begins advancing."
+        }
+        return "Install mere.run and Film Studio tools to create new films. Existing GRACE workspaces can still be opened for inspection."
+    }
+
+    private var actionBar: some View {
+        HStack(spacing: AppTheme.Spacing.smMd) {
+            if model.briefNeedsInput {
+                Button("Complete Brief…") { showingBrief = true }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(model.isBusy)
+            } else if model.pendingGate == "production", !model.productionReady {
+                Button("Finish Production Setup") { section = .setup }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(model.isBusy)
+            } else if model.productionNeedsConfiguration {
+                Button("Configure Production…") { showingProductionSettings = true }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(model.isBusy)
+            } else if model.hasPendingReviewRequests {
+                Button("View Requested Revisions") { section = .review }
+                    .buttonStyle(.borderedProminent)
+            } else if model.needsHumanReviewDecision {
+                Button("Review & Decide…") { showingHumanReview = true }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(model.isBusy)
+            } else if let gate = model.pendingGate {
+                Button("Approve \(model.displayName(gate))") { model.approvePendingGate() }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(!model.canApprove)
+            }
+
+            if model.snapshot != nil, model.pendingGate == nil, !model.isCompleted {
+                Button("Continue Production") {
+                    if model.canAdvance {
+                        model.advance()
+                    } else {
+                        section = .setup
+                    }
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(model.isBusy)
+            }
+
+            if model.playableCutURL != nil {
+                Button("Play Cut") { model.openPlayableCut() }
+            }
+
+            Spacer(minLength: AppTheme.Spacing.md)
+
+            if model.hasInterruptedWork {
+                Button("Recover") { model.recover() }
+                    .disabled(model.isBusy)
+            }
+            if model.canReview {
+                Button("Run Review") { model.runReview() }
+            }
+        }
+        .padding(.horizontal, AppTheme.Spacing.xl)
+        .padding(.vertical, AppTheme.Spacing.mdLg)
+        .background(AppTheme.Background.baseColor.opacity(AppTheme.Opacity.prominent))
+    }
+
+    private func metric(_ title: String, _ value: String, _ symbol: String) -> some View {
+        VStack(alignment: .leading, spacing: AppTheme.Spacing.smMd) {
+            Image(systemName: symbol)
+                .font(.system(size: AppTheme.FontSize.lg))
+                .foregroundStyle(AppTheme.Text.tertiaryColor)
+            Text(verbatim: value)
+                .font(.system(size: AppTheme.FontSize.title1, weight: AppTheme.FontWeight.semibold))
+                .foregroundStyle(AppTheme.Text.primaryColor)
+                .lineLimit(1)
+            Text(verbatim: title)
+                .font(.system(size: AppTheme.FontSize.sm))
+                .foregroundStyle(AppTheme.Text.tertiaryColor)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(AppTheme.Spacing.lg)
+        .background(AppTheme.Background.raisedColor, in: RoundedRectangle(cornerRadius: AppTheme.Radius.md))
+    }
+
+    private func optionalField(_ label: String, _ value: String?) -> some View {
+        field(label, normalized(value))
+    }
+
+    private func normalized(_ value: String?) -> String {
+        guard let value, !value.isEmpty, value.lowercased() != "unspecified" else { return "Not set" }
+        return value
+    }
+
+    private func field(_ label: String, _ text: String) -> some View {
+        VStack(alignment: .leading, spacing: AppTheme.Spacing.xs) {
+            Text(verbatim: label)
+                .font(.system(size: AppTheme.FontSize.sm, weight: AppTheme.FontWeight.semibold))
+                .foregroundStyle(AppTheme.Text.tertiaryColor)
+            Text(verbatim: text)
+                .font(.system(size: AppTheme.FontSize.md))
+                .foregroundStyle(AppTheme.Text.primaryColor)
+                .textSelection(.enabled)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    private func valueRow(_ label: String, _ value: String) -> some View {
+        HStack {
+            Text(verbatim: label).foregroundStyle(AppTheme.Text.tertiaryColor)
+            Spacer(minLength: AppTheme.Spacing.md)
+            Text(verbatim: value)
+                .font(.system(size: AppTheme.FontSize.smMd, weight: AppTheme.FontWeight.medium))
+        }
+    }
+
+    private func proof(_ label: String, _ value: Bool) -> some View {
+        HStack(spacing: AppTheme.Spacing.smMd) {
+            Image(systemName: value ? "checkmark.circle.fill" : "circle")
+                .foregroundStyle(value ? AppTheme.Status.successColor : AppTheme.Text.mutedColor)
+            Text(verbatim: label).foregroundStyle(AppTheme.Text.primaryColor)
+            Spacer(minLength: AppTheme.Spacing.md)
+            Text(verbatim: value ? "Passed" : "Pending")
+                .font(.system(size: AppTheme.FontSize.sm))
+                .foregroundStyle(AppTheme.Text.tertiaryColor)
+        }
+        .padding(.vertical, AppTheme.Spacing.xs)
     }
 
     private func setupRow(
@@ -869,6 +927,17 @@ struct FilmStudioWorkspaceView: View {
         .padding(.vertical, AppTheme.Spacing.smMd)
     }
 
+    private func executableOverride(_ label: String, text: Binding<String>) -> some View {
+        VStack(alignment: .leading, spacing: AppTheme.Spacing.xs) {
+            Text(verbatim: label)
+                .font(.system(size: AppTheme.FontSize.sm))
+                .foregroundStyle(AppTheme.Text.tertiaryColor)
+            TextField("Auto-detect", text: text)
+                .textFieldStyle(.roundedBorder)
+                .disabled(model.isBusy)
+        }
+    }
+
     private func agentModelDetail(_ runtime: FilmStudioRuntimeStatus) -> String {
         if let selected = runtime.selectedAgentModel {
             return "\(selected.displayName) · \(selected.id)"
@@ -879,63 +948,17 @@ struct FilmStudioWorkspaceView: View {
         return runtime.agentError ?? "No startable local agent model is installed"
     }
 
-    private var actionBar: some View {
-        HStack(spacing: AppTheme.Spacing.smMd) {
-            if model.briefNeedsInput {
-                Button("Complete Brief…") {
-                    showingBrief = true
-                }
-                .buttonStyle(.borderedProminent)
-                .disabled(model.isBusy)
-            } else if model.productionNeedsConfiguration {
-                Button("Configure Production…") {
-                    showingProductionSettings = true
-                }
-                .buttonStyle(.borderedProminent)
-                .disabled(model.isBusy || model.runtime?.filmToolsReady != true)
-            } else if let gate = model.pendingGate {
-                Button("Approve \(model.displayName(gate))") {
-                    model.approvePendingGate()
-                }
-                .buttonStyle(.borderedProminent)
-                .disabled(!model.canApprove)
-            }
-
-            if model.snapshot != nil, model.pendingGate == nil, !model.isCompleted {
-                Button("Continue Production") {
-                    if model.productionReady {
-                        model.advance()
-                    } else {
-                        section = .setup
-                    }
-                }
-                .buttonStyle(.borderedProminent)
-                .disabled(model.isBusy)
-            }
-
-            if model.playableCutURL != nil {
-                Button("Play Cut") {
-                    model.openPlayableCut()
-                }
-            }
-
-            Spacer(minLength: AppTheme.Spacing.md)
-
-            if model.hasInterruptedWork {
-                Button("Recover") {
-                    model.recover()
-                }
-                .disabled(model.isBusy)
-            }
-            if model.canReview, !model.isCompleted {
-                Button("Run Review") {
-                    model.runReview()
-                }
-            }
+    private func providerDetail(_ runtime: FilmStudioRuntimeStatus) -> String {
+        guard let provider = runtime.agentStatus?.provider else {
+            return "Waiting for mere.run agent status"
         }
-        .padding(.horizontal, AppTheme.Spacing.xl)
-        .padding(.vertical, AppTheme.Spacing.mdLg)
-        .background(AppTheme.Background.baseColor.opacity(AppTheme.Opacity.prominent))
+        if runtime.providerReady {
+            return "mere-run · \(provider.modelID ?? "selected model") · \(provider.host ?? "127.0.0.1"):\(provider.port ?? 8080)"
+        }
+        if provider.configured {
+            return "Configured for \(provider.modelID ?? "another model"); reconfigure for the selected model"
+        }
+        return "Not configured for the selected local agent model"
     }
 
     private func statusSymbol(_ status: String) -> String {
@@ -955,8 +978,15 @@ struct FilmStudioWorkspaceView: View {
         default: AppTheme.Text.mutedColor
         }
     }
+
+    private func divider(width: CGFloat? = nil, height: CGFloat? = nil) -> some View {
+        Rectangle()
+            .fill(AppTheme.Border.primaryColor)
+            .frame(width: width, height: height)
+    }
 }
 
+@MainActor
 struct FilmStudioCard<Content: View>: View {
     let title: String
     private let content: Content
