@@ -28,6 +28,13 @@ final class PalmierFilmStudioModel: ObservableObject {
         }
     }
 
+    private enum AdvanceRequirement {
+        case agent
+        case media
+        case agentAndMedia
+        case blocked
+    }
+
     @Published private(set) var snapshot: FilmWorkspaceSnapshot?
     @Published private(set) var playableCutURL: URL?
     @Published private(set) var runtime: FilmStudioRuntimeStatus?
@@ -114,7 +121,15 @@ final class PalmierFilmStudioModel: ObservableObject {
     }
 
     var hasPendingReviewRequests: Bool {
-        snapshot?.project.reviewRequests.isEmpty == false
+        snapshot?.project.reviewRequests.contains { $0.status == "pending" } == true
+    }
+
+    var requiresCreativeRevision: Bool {
+        guard let project = snapshot?.project else { return false }
+        return project.status == "revision-required"
+            && project.proof.assembly
+            && !project.proof.review
+            && !hasPendingReviewRequests
     }
 
     var needsHumanReviewDecision: Bool {
@@ -126,6 +141,7 @@ final class PalmierFilmStudioModel: ObservableObject {
 
     var planningReady: Bool { runtime?.planningReady == true }
     var agentReady: Bool { runtime?.agentReady == true }
+    var mediaReady: Bool { runtime?.planningReady == true && runtime?.mediaToolsReady == true }
     var productionReady: Bool { runtime?.productionReady == true }
     var canCreateFilm: Bool { planningReady && !isBusy }
 
@@ -138,7 +154,7 @@ final class PalmierFilmStudioModel: ObservableObject {
 
         switch gate {
         case "production":
-            return !productionNeedsConfiguration && productionReady
+            return !productionNeedsConfiguration && mediaReady
         case "picture-lock":
             return snapshot?.project.proof.humanReview == true && !hasPendingReviewRequests
         default:
@@ -151,14 +167,24 @@ final class PalmierFilmStudioModel: ObservableObject {
               pendingGate == nil,
               !isCompleted,
               !isBusy else { return false }
-        return nextAdvanceNeedsMediaRuntime ? productionReady : agentReady
+        switch advanceRequirement {
+        case .agent:
+            return agentReady
+        case .media:
+            return mediaReady
+        case .agentAndMedia:
+            return productionReady
+        case .blocked:
+            return false
+        }
     }
 
     var canReview: Bool {
-        guard let proof = snapshot?.project.proof else { return false }
+        guard let project = snapshot?.project else { return false }
         return playableCutURL != nil
-            && proof.assembly
-            && !proof.review
+            && project.proof.assembly
+            && !project.proof.review
+            && project.status != "revision-required"
             && productionReady
             && !isCompleted
             && !isBusy
@@ -175,8 +201,24 @@ final class PalmierFilmStudioModel: ObservableObject {
         snapshot?.project.jobs.contains { $0.status == "running" } == true
     }
 
-    private var nextAdvanceNeedsMediaRuntime: Bool {
-        snapshot?.project.approvals["production"]?.status == "approved"
+    private var advanceRequirement: AdvanceRequirement {
+        guard let project = snapshot?.project else { return .blocked }
+        if project.approvals["treatment"]?.status != "approved" {
+            return .agent
+        }
+        if project.approvals["production"]?.status != "approved" {
+            return .agent
+        }
+        if !project.proof.assembly {
+            return .media
+        }
+        if !project.proof.review {
+            return project.status == "revision-required" ? .blocked : .agentAndMedia
+        }
+        if project.approvals["picture-lock"]?.status == "approved", !project.proof.delivery {
+            return .media
+        }
+        return .blocked
     }
 
     var effectiveNewFilmTitle: String {
@@ -526,10 +568,13 @@ final class PalmierFilmStudioModel: ObservableObject {
     }
 
     func advance() {
-        guard canAdvance, let runManifest = snapshot?.runManifest else {
+        guard canAdvance,
+              let runManifest = snapshot?.runManifest,
+              let filmToolPath = runtime?.filmToolPath else {
             errorMessage = StudioError.setupIncomplete.localizedDescription
             return
         }
+        let requirement = advanceRequirement
         let filmToolExecutable = filmToolExecutable
         let mereRunExecutable = mereRunExecutable
         beginActivity("Continuing production…")
@@ -537,11 +582,21 @@ final class PalmierFilmStudioModel: ObservableObject {
             guard let self else { return }
             defer { self.endActivity() }
             do {
-                try await FilmStudioService.advance(
-                    runManifest: runManifest,
-                    filmToolExecutable: filmToolExecutable,
-                    mereRunExecutable: mereRunExecutable
-                )
+                switch requirement {
+                case .agent, .agentAndMedia:
+                    try await FilmStudioService.advance(
+                        runManifest: runManifest,
+                        filmToolExecutable: filmToolExecutable,
+                        mereRunExecutable: mereRunExecutable
+                    )
+                case .media:
+                    try await FilmStudioService.advanceWithoutAgent(
+                        runManifest: runManifest,
+                        filmToolPath: filmToolPath
+                    )
+                case .blocked:
+                    throw StudioError.setupIncomplete
+                }
                 await self.reloadCurrentProject(reportErrors: true)
                 if let gate = self.pendingGate {
                     self.noticeMessage = "Production stopped for \(self.displayName(gate)) approval."
@@ -575,7 +630,11 @@ final class PalmierFilmStudioModel: ObservableObject {
                     mereRunExecutable: mereRunExecutable
                 )
                 await self.reloadCurrentProject(reportErrors: true)
-                self.noticeMessage = "Review finished. Watch the cut and record your human review decision before picture lock."
+                if self.requiresCreativeRevision {
+                    self.noticeMessage = "Independent review requested revisions. Reroll the affected shots, then continue production to rebuild the cut."
+                } else {
+                    self.noticeMessage = "Review finished. Watch the cut and record your human review decision before picture lock."
+                }
             } catch {
                 self.errorMessage = error.localizedDescription
                 await self.reloadCurrentProject(reportErrors: false)
@@ -601,7 +660,7 @@ final class PalmierFilmStudioModel: ObservableObject {
                     filmToolExecutable: filmToolExecutable
                 )
                 await self.reloadCurrentProject(reportErrors: true)
-                self.noticeMessage = "\(shotID) is prepared for a targeted reroll. Continue production when the review requests are resolved."
+                self.noticeMessage = "\(shotID) is prepared for a targeted reroll. Continue production when the requested revisions are resolved."
             } catch {
                 self.errorMessage = error.localizedDescription
             }
