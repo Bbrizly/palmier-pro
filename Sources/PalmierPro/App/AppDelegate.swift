@@ -21,7 +21,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         _ = Updater.shared
 
         HomeWindowController.shared.showWindow(nil)
-        FilmStudioIntegration.installMenuItem()
         SkillStore.shared.startSkillSync()
         Task.detached(priority: .utility) {
             Project.ensureStorageDirectory()
@@ -145,6 +144,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @MainActor
     @objc func showSettings(_ sender: Any?) {
         SettingsWindowController.shared.show()
+    }
+
+    @MainActor
+    @objc func showFilmStudio(_ sender: Any?) {
+        FilmStudioWindowController.shared.show()
     }
 
     @MainActor
