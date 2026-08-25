@@ -59,12 +59,24 @@ actor FilmStudioAgentServer {
         }
     }
 
-    func stop() {
-        stopManagedProcess()
+    func stop() async {
+        guard let process else {
+            managedEndpoint = nil
+            return
+        }
+        self.process = nil
+        managedEndpoint = nil
+        guard process.isRunning else { return }
+
+        process.terminate()
+        for _ in 0..<20 {
+            if !process.isRunning { return }
+            try? await Task.sleep(for: .milliseconds(100))
+        }
     }
 
     private func waitUntilHealthy(process: Process, endpoint: Endpoint) async throws {
-        for _ in 0..<80 {
+        for _ in 0..<240 {
             try Task.checkCancellation()
             if await isHealthy(endpoint) { return }
             if !process.isRunning {
