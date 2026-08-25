@@ -21,42 +21,43 @@ public enum FilmProjectError: LocalizedError, Equatable {
 }
 
 public enum FilmProjectLoader {
-    public static func load(runManifest input: URL) throws -> FilmWorkspaceSnapshot {
-        let runManifest = input.standardizedFileURL
-        guard FileManager.default.fileExists(atPath: runManifest.path) else {
-            throw FilmProjectError.missingRunManifest(runManifest)
+    private struct WorkspaceFiles {
+        let run: URL
+        let root: URL
+
+        init(_ input: URL) {
+            run = input.standardizedFileURL
+            root = run.deletingLastPathComponent()
         }
 
-        let root = runManifest.deletingLastPathComponent()
-        let projectURL = root.appending(path: "film-project.json")
-        guard FileManager.default.fileExists(atPath: projectURL.path) else {
-            throw FilmProjectError.missingProject(projectURL)
+        var project: URL { root.appending(path: "film-project.json") }
+        var productionPlan: URL { root.appending(path: "production-plan.json") }
+        var treatment: URL { root.appending(path: "treatment.json") }
+    }
+
+    public static func load(runManifest: URL) throws -> FilmWorkspaceSnapshot {
+        let files = WorkspaceFiles(runManifest)
+        let fileManager = FileManager.default
+
+        guard fileManager.fileExists(atPath: files.run.path) else {
+            throw FilmProjectError.missingRunManifest(files.run)
+        }
+        guard fileManager.fileExists(atPath: files.project.path) else {
+            throw FilmProjectError.missingProject(files.project)
         }
 
         do {
-            let decoder = JSONDecoder()
-            let project = try decoder.decode(FilmProject.self, from: Data(contentsOf: projectURL))
+            let project: FilmProject = try read(files.project)
             guard project.contractVersion == "mere.run/film-project.v1" else {
                 throw FilmProjectError.unsupportedContract(project.contractVersion)
             }
 
-            let productionPlan = try decodeIfPresent(
-                FilmProductionPlan.self,
-                at: root.appending(path: "production-plan.json"),
-                using: decoder
-            )
-            let treatment = try decodeIfPresent(
-                FilmTreatment.self,
-                at: root.appending(path: "treatment.json"),
-                using: decoder
-            )
-
             return FilmWorkspaceSnapshot(
-                root: root,
-                runManifest: runManifest,
+                root: files.root,
+                runManifest: files.run,
                 project: project,
-                productionPlan: productionPlan,
-                treatment: treatment
+                productionPlan: try readOptional(files.productionPlan),
+                treatment: try readOptional(files.treatment)
             )
         } catch let error as FilmProjectError {
             throw error
@@ -65,12 +66,12 @@ public enum FilmProjectLoader {
         }
     }
 
-    private static func decodeIfPresent<T: Decodable>(
-        _ type: T.Type,
-        at url: URL,
-        using decoder: JSONDecoder
-    ) throws -> T? {
+    private static func read<Value: Decodable>(_ url: URL) throws -> Value {
+        try JSONDecoder().decode(Value.self, from: Data(contentsOf: url))
+    }
+
+    private static func readOptional<Value: Decodable>(_ url: URL) throws -> Value? {
         guard FileManager.default.fileExists(atPath: url.path) else { return nil }
-        return try decoder.decode(type, from: Data(contentsOf: url))
+        return try read(url)
     }
 }
