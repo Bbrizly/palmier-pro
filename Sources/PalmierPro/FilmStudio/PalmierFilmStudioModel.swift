@@ -100,16 +100,36 @@ final class PalmierFilmStudioModel: ObservableObject {
         snapshot?.project.brief.openQuestions.isEmpty == false
     }
 
+    var isCompleted: Bool {
+        snapshot?.project.status == "completed" || snapshot?.project.phase == "completed"
+    }
+
+    var productionModelReadinessBlocked: Bool {
+        snapshot?.project.issues.contains { $0.code == "model-readiness" && $0.blocking } == true
+    }
+
+    var productionNeedsConfiguration: Bool {
+        guard pendingGate == "production", let snapshot else { return false }
+        return snapshot.project.production.mode == "plan" || productionModelReadinessBlocked
+    }
+
     var productionReady: Bool { runtime?.productionReady == true }
     var canCreateFilm: Bool { productionReady && !isBusy }
     var canApprove: Bool {
         snapshot != nil
             && pendingGate != nil
             && !briefNeedsInput
+            && !productionNeedsConfiguration
             && runtime?.filmToolsReady == true
             && !isBusy
     }
-    var canAdvance: Bool { snapshot != nil && pendingGate == nil && productionReady && !isBusy }
+    var canAdvance: Bool {
+        snapshot != nil
+            && pendingGate == nil
+            && productionReady
+            && !isCompleted
+            && !isBusy
+    }
     var canReview: Bool { snapshot != nil && playableCutURL != nil && productionReady && !isBusy }
     var canReroll: Bool { snapshot != nil && runtime?.filmToolsReady == true && !isBusy }
     var hasInterruptedWork: Bool {
@@ -353,6 +373,39 @@ final class PalmierFilmStudioModel: ObservableObject {
         }
     }
 
+    func configureProduction(mode: String, takesPerShot: Int) {
+        guard !isBusy,
+              pendingGate == "production",
+              let runManifest = snapshot?.runManifest,
+              let filmToolPath = runtime?.filmToolPath else { return }
+        beginActivity("Checking production setup…")
+        commandTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            defer { self.endActivity() }
+            do {
+                try await FilmStudioService.configureProduction(
+                    runManifest: runManifest,
+                    mode: mode,
+                    takesPerShot: takesPerShot,
+                    filmToolPath: filmToolPath
+                )
+                do {
+                    try await FilmStudioService.preflightProduction(
+                        runManifest: runManifest,
+                        filmToolPath: filmToolPath
+                    )
+                    await self.reloadCurrentProject(reportErrors: true)
+                    self.noticeMessage = "Production is configured and the required local models passed preflight. Review the plan, then approve production."
+                } catch {
+                    await self.reloadCurrentProject(reportErrors: false)
+                    self.errorMessage = "Production settings were saved, but model preflight failed. \(error.localizedDescription)"
+                }
+            } catch {
+                self.errorMessage = error.localizedDescription
+            }
+        }
+    }
+
     func approvePendingGate() {
         guard canApprove,
               let runManifest = snapshot?.runManifest,
@@ -395,6 +448,8 @@ final class PalmierFilmStudioModel: ObservableObject {
                 await self.reloadCurrentProject(reportErrors: true)
                 if let gate = self.pendingGate {
                     self.noticeMessage = "Production stopped for \(self.displayName(gate)) approval."
+                } else if self.isCompleted {
+                    self.noticeMessage = "Film completed. The verified master is ready for Palmier."
                 } else {
                     self.noticeMessage = "Production advanced."
                 }
