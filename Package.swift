@@ -25,15 +25,16 @@ let package = Package(
         .package(url: "https://github.com/ml-explore/mlx-swift", exact: "0.31.5"),
         .package(url: "https://github.com/airbnb/lottie-ios", from: "4.6.1"),
         .package(url: "https://github.com/soniqo/speech-swift", exact: "0.0.21"),
-        .package(
-            url: "https://github.com/sawfwair/mere-film-studio",
-            revision: "b634af5290f7fbf3ae3f7065c912386fb105a018"
-        ),
     ],
     targets: [
+        .target(
+            name: "FilmStudioCore",
+            path: "Sources/FilmStudioCore"
+        ),
         .executableTarget(
             name: "PalmierPro",
             dependencies: [
+                "FilmStudioCore",
                 .product(name: "MCP", package: "swift-sdk"),
                 .product(name: "Sparkle", package: "Sparkle"),
                 .product(
@@ -51,7 +52,6 @@ let package = Package(
                 .product(name: "ConvexMobile", package: "convex-swift"),
                 .product(name: "Tokenizers", package: "swift-transformers"),
                 .product(name: "Lottie", package: "lottie-ios"),
-                .product(name: "FilmStudioCore", package: "mere-film-studio"),
                 .product(
                     name: "MLX",
                     package: "mlx-swift",
