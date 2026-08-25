@@ -138,6 +138,10 @@ enum MainMenuBuilder {
         agentItem.keyEquivalentModifierMask = [.command, .option]
         menu.addItem(agentItem)
 
+        let filmStudioItem = NSMenuItem(title: "Film Studio…", action: #selector(AppDelegate.showFilmStudio(_:)), keyEquivalent: "")
+        filmStudioItem.target = NSApp.delegate
+        menu.addItem(filmStudioItem)
+
         menu.addItem(.separator())
 
         let maximizeItem = NSMenuItem(title: L10n.string("Maximize Focused Panel"), action: #selector(EditorActions.toggleMaximizePanel(_:)), keyEquivalent: "`")
