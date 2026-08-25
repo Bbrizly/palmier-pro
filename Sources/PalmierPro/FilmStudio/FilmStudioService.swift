@@ -253,8 +253,9 @@ enum FilmStudioService {
             throw FilmStudioServiceError.missingAgentModel
         }
 
+        let availableOutput = uniqueOutputDirectory(preferred: outputDirectory)
         try FileManager.default.createDirectory(
-            at: outputDirectory.deletingLastPathComponent(),
+            at: availableOutput.deletingLastPathComponent(),
             withIntermediateDirectories: true
         )
         let result = try await FilmToolClient(executable: filmTool.path).run(
@@ -263,7 +264,7 @@ enum FilmStudioService {
                 "--idea", idea,
                 "--title", title,
                 "--duration", String(durationSeconds),
-                "--output-dir", outputDirectory.path,
+                "--output-dir", availableOutput.path,
                 "--pi-command", piPath,
                 "--mere-run-command", mereRun.path,
             ],
@@ -271,6 +272,35 @@ enum FilmStudioService {
         )
         let response = try decode(PlanResponse.self, from: result.stdout)
         return URL(fileURLWithPath: response.status.runManifest)
+    }
+
+    @concurrent
+    static func updateBrief(
+        runManifest: URL,
+        audience: String,
+        genre: String,
+        tone: String,
+        rating: String,
+        usage: String,
+        references: [String],
+        filmToolExecutable: String
+    ) async throws {
+        let filmTool = try requireExecutable(filmToolExecutable)
+        var arguments = [
+            "brief", runManifest.path,
+            "--audience", audience,
+            "--genre", genre,
+            "--tone", tone,
+            "--rating", rating,
+            "--usage", usage,
+        ]
+        for reference in references {
+            arguments.append(contentsOf: ["--reference", reference])
+        }
+        _ = try await FilmToolClient(executable: filmTool.path).run(
+            arguments,
+            environment: processEnvironment()
+        )
     }
 
     @concurrent
@@ -323,6 +353,20 @@ enum FilmStudioService {
         _ = try await FilmToolClient(executable: filmTool.path).run(
             ["review", runManifest.path, "--pi-command", context.piPath],
             environment: environment
+        )
+    }
+
+    @concurrent
+    static func reroll(
+        runManifest: URL,
+        shotID: String,
+        note: String,
+        filmToolExecutable: String
+    ) async throws {
+        let filmTool = try requireExecutable(filmToolExecutable)
+        _ = try await FilmToolClient(executable: filmTool.path).run(
+            ["reroll", runManifest.path, "--shot", shotID, "--note", note],
+            environment: processEnvironment()
         )
     }
 
@@ -395,6 +439,18 @@ enum FilmStudioService {
             return (homeLocal, nil)
         }
         return (nil, "Required executable not found: \(value)")
+    }
+
+    private static func uniqueOutputDirectory(preferred: URL) -> URL {
+        guard FileManager.default.fileExists(atPath: preferred.path) else { return preferred }
+        let parent = preferred.deletingLastPathComponent()
+        let base = preferred.lastPathComponent
+        var index = 2
+        while true {
+            let candidate = parent.appending(path: "\(base)-\(index)", directoryHint: .isDirectory)
+            if !FileManager.default.fileExists(atPath: candidate.path) { return candidate }
+            index += 1
+        }
     }
 
     private static func processEnvironment() -> [String: String] {
