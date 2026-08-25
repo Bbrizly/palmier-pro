@@ -21,7 +21,7 @@ extension FilmStudioService {
                 "--mode", mode,
                 "--takes-per-shot", String(takesPerShot),
             ],
-            environment: productionProcessEnvironment()
+            environment: processEnvironment()
         )
     }
 
@@ -32,26 +32,7 @@ extension FilmStudioService {
     ) async throws {
         _ = try await FilmToolClient(executable: filmToolPath).run(
             ["preflight", runManifest.path],
-            environment: productionProcessEnvironment()
+            environment: processEnvironment()
         )
-    }
-
-    private static func productionProcessEnvironment() -> [String: String] {
-        var environment = ProcessInfo.processInfo.environment
-        var pathComponents = (environment["PATH"] ?? "")
-            .split(separator: ":")
-            .map(String.init)
-        let additions = [
-            FileManager.default.homeDirectoryForCurrentUser.appending(path: ".local/bin").path,
-            "/opt/homebrew/bin",
-            "/usr/local/bin",
-            "/usr/bin",
-            "/bin",
-        ]
-        for addition in additions where !pathComponents.contains(addition) {
-            pathComponents.append(addition)
-        }
-        environment["PATH"] = pathComponents.joined(separator: ":")
-        return environment
     }
 }
