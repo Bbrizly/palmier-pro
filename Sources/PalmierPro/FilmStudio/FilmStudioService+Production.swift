@@ -35,4 +35,15 @@ extension FilmStudioService {
             environment: processEnvironment()
         )
     }
+
+    @concurrent
+    static func advanceWithoutAgent(
+        runManifest: URL,
+        filmToolPath: String
+    ) async throws {
+        _ = try await FilmToolClient(executable: filmToolPath).run(
+            ["run", runManifest.path],
+            environment: processEnvironment()
+        )
+    }
 }
