@@ -96,11 +96,22 @@ final class PalmierFilmStudioModel: ObservableObject {
             .first { approvals[$0]?.status == "pending" }
     }
 
+    var briefNeedsInput: Bool {
+        snapshot?.project.brief.openQuestions.isEmpty == false
+    }
+
     var productionReady: Bool { runtime?.productionReady == true }
     var canCreateFilm: Bool { productionReady && !isBusy }
-    var canApprove: Bool { snapshot != nil && pendingGate != nil && runtime?.filmToolsReady == true && !isBusy }
+    var canApprove: Bool {
+        snapshot != nil
+            && pendingGate != nil
+            && !briefNeedsInput
+            && runtime?.filmToolsReady == true
+            && !isBusy
+    }
     var canAdvance: Bool { snapshot != nil && pendingGate == nil && productionReady && !isBusy }
     var canReview: Bool { snapshot != nil && playableCutURL != nil && productionReady && !isBusy }
+    var canReroll: Bool { snapshot != nil && runtime?.filmToolsReady == true && !isBusy }
     var hasInterruptedWork: Bool {
         snapshot?.project.jobs.contains { $0.status == "running" } == true
     }
@@ -288,7 +299,54 @@ final class PalmierFilmStudioModel: ObservableObject {
                 self.applyLoadedProject(loaded)
                 self.newFilmIdea = ""
                 self.newFilmTitle = ""
-                self.noticeMessage = "Film created. Review the brief, then approve it when it looks right."
+                self.noticeMessage = "Film created. Complete the brief, then approve it when it looks right."
+            } catch {
+                self.errorMessage = error.localizedDescription
+            }
+        }
+    }
+
+    func completeBrief(
+        audience: String,
+        genre: String,
+        tone: String,
+        rating: String,
+        usage: String,
+        references: String
+    ) {
+        guard !isBusy, let runManifest = snapshot?.runManifest else { return }
+        let values = [audience, genre, tone, rating, usage]
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+        guard values.allSatisfy({ !$0.isEmpty }) else {
+            errorMessage = "Audience, genre, tone, rating, and intended use are required before greenlight."
+            return
+        }
+        let referenceValues = references
+            .split(whereSeparator: \.isNewline)
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        let confirmedReferences = referenceValues.isEmpty ? ["No specific references"] : referenceValues
+        let filmToolExecutable = filmToolExecutable
+
+        beginActivity("Updating brief…")
+        commandTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            defer { self.endActivity() }
+            do {
+                try await FilmStudioService.updateBrief(
+                    runManifest: runManifest,
+                    audience: values[0],
+                    genre: values[1],
+                    tone: values[2],
+                    rating: values[3],
+                    usage: values[4],
+                    references: confirmedReferences,
+                    filmToolExecutable: filmToolExecutable
+                )
+                await self.reloadCurrentProject(reportErrors: true)
+                self.noticeMessage = self.briefNeedsInput
+                    ? "Brief updated. Resolve the remaining questions before approval."
+                    : "Brief is complete. Review it, then approve the brief."
             } catch {
                 self.errorMessage = error.localizedDescription
             }
@@ -370,6 +428,31 @@ final class PalmierFilmStudioModel: ObservableObject {
         }
     }
 
+    func reroll(shotID: String, note: String) {
+        let reason = note.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard canReroll,
+              !reason.isEmpty,
+              let runManifest = snapshot?.runManifest else { return }
+        let filmToolExecutable = filmToolExecutable
+        beginActivity("Preparing \(shotID) reroll…")
+        commandTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            defer { self.endActivity() }
+            do {
+                try await FilmStudioService.reroll(
+                    runManifest: runManifest,
+                    shotID: shotID,
+                    note: reason,
+                    filmToolExecutable: filmToolExecutable
+                )
+                await self.reloadCurrentProject(reportErrors: true)
+                self.noticeMessage = "\(shotID) is queued for a targeted reroll. Continue production when ready."
+            } catch {
+                self.errorMessage = error.localizedDescription
+            }
+        }
+    }
+
     func recover() {
         guard !isBusy, let runManifest = snapshot?.runManifest else {
             errorMessage = StudioError.noProject.localizedDescription
@@ -416,6 +499,14 @@ final class PalmierFilmStudioModel: ObservableObject {
                 self.errorMessage = error.localizedDescription
             }
         }
+    }
+
+    func openPlayableCut() {
+        guard let cutURL = playableCutURL else {
+            errorMessage = StudioError.noPlayableCut.localizedDescription
+            return
+        }
+        NSWorkspace.shared.open(cutURL)
     }
 
     func revealPlayableCut() {
