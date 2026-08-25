@@ -8,6 +8,10 @@ actor FilmStudioAgentServer {
         let port: Int
     }
 
+    private struct HealthResponse: Decodable {
+        let status: String
+    }
+
     private var process: Process?
     private var managedEndpoint: Endpoint?
 
@@ -25,7 +29,7 @@ actor FilmStudioAgentServer {
             return
         }
 
-        stopManagedProcess()
+        await stop()
 
         let process = Process()
         process.executableURL = mereRun
@@ -103,8 +107,10 @@ actor FilmStudioAgentServer {
         request.timeoutInterval = 0.75
         request.cachePolicy = .reloadIgnoringLocalCacheData
         do {
-            let (_, response) = try await URLSession.shared.data(for: request)
-            return (response as? HTTPURLResponse)?.statusCode == 200
+            let (data, response) = try await URLSession.shared.data(for: request)
+            guard (response as? HTTPURLResponse)?.statusCode == 200,
+                  let health = try? JSONDecoder().decode(HealthResponse.self, from: data) else { return false }
+            return health.status == "ok"
         } catch {
             return false
         }
