@@ -94,6 +94,7 @@ let package = Package(
             name: "PalmierProTests",
             dependencies: [
                 "PalmierPro",
+                "FilmStudioCore",
                 .product(name: "MCP", package: "swift-sdk"),
             ],
             path: "Tests/PalmierProTests"
