@@ -96,14 +96,19 @@ public struct FilmBrief: Decodable, Sendable, Equatable {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         let target = try container.decodeIfPresent(Target.self, forKey: .target)
         let creative = try container.decodeIfPresent(Creative.self, forKey: .creative)
-        audience = target?.audience ?? container.decodeIfPresent(String.self, forKey: .audience)
-        genre = creative?.genre ?? container.decodeIfPresent(String.self, forKey: .genre)
-        tone = creative?.tone ?? container.decodeIfPresent(String.self, forKey: .tone)
-        rating = target?.rating ?? container.decodeIfPresent(String.self, forKey: .rating)
-        usage = target?.usage ?? container.decodeIfPresent(String.self, forKey: .usage)
-        references = creative?.references
-            ?? container.decodeIfPresent([String].self, forKey: .references)
-            ?? []
+        let flatAudience = try container.decodeIfPresent(String.self, forKey: .audience)
+        let flatGenre = try container.decodeIfPresent(String.self, forKey: .genre)
+        let flatTone = try container.decodeIfPresent(String.self, forKey: .tone)
+        let flatRating = try container.decodeIfPresent(String.self, forKey: .rating)
+        let flatUsage = try container.decodeIfPresent(String.self, forKey: .usage)
+        let flatReferences = try container.decodeIfPresent([String].self, forKey: .references)
+
+        audience = target?.audience ?? flatAudience
+        genre = creative?.genre ?? flatGenre
+        tone = creative?.tone ?? flatTone
+        rating = target?.rating ?? flatRating
+        usage = target?.usage ?? flatUsage
+        references = creative?.references ?? flatReferences ?? []
         openQuestions = try container.decodeIfPresent([String].self, forKey: .openQuestions) ?? []
     }
 }
