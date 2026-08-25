@@ -921,7 +921,12 @@ struct FilmStudioWorkspaceView: View {
 
 private struct FilmStudioCard<Content: View>: View {
     let title: String
-    @ViewBuilder let content: () -> Content
+    private let content: Content
+
+    init(title: String, @ViewBuilder content: () -> Content) {
+        self.title = title
+        self.content = content()
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: AppTheme.Spacing.smMd) {
@@ -929,7 +934,7 @@ private struct FilmStudioCard<Content: View>: View {
                 .font(.system(size: AppTheme.FontSize.smMd, weight: AppTheme.FontWeight.medium))
                 .foregroundStyle(AppTheme.Text.primaryColor)
             VStack(alignment: .leading, spacing: AppTheme.Spacing.md) {
-                content()
+                content
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(AppTheme.Spacing.lg)
@@ -1044,7 +1049,7 @@ private struct CompleteBriefSheet: View {
     @State private var usage: String
     @State private var references: String
 
-    private let usageOptions = ["personal", "noncommercial", "commercial"]
+    private static let usageOptions = ["personal", "noncommercial", "commercial"]
 
     init(model: PalmierFilmStudioModel) {
         self.model = model
@@ -1054,7 +1059,7 @@ private struct CompleteBriefSheet: View {
         _tone = State(initialValue: Self.clean(brief?.tone))
         _rating = State(initialValue: Self.clean(brief?.rating))
         let currentUsage = Self.clean(brief?.usage)
-        _usage = State(initialValue: usageOptions.contains(currentUsage) ? currentUsage : "personal")
+        _usage = State(initialValue: Self.usageOptions.contains(currentUsage) ? currentUsage : "personal")
         _references = State(initialValue: brief?.references.joined(separator: "\n") ?? "")
     }
 
