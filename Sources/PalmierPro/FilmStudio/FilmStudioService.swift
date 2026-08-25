@@ -40,6 +40,13 @@ struct FilmStudioAgentPi: Decodable, Sendable, Equatable {
     let version: String?
 }
 
+struct FilmStudioAgentProvider: Decodable, Sendable, Equatable {
+    let configured: Bool
+    let host: String?
+    let port: Int?
+    let modelID: String?
+}
+
 struct FilmStudioAgentModel: Decodable, Sendable, Equatable, Identifiable {
     let id: String
     let displayName: String
@@ -56,6 +63,7 @@ struct FilmStudioAgentModel: Decodable, Sendable, Equatable, Identifiable {
 struct FilmStudioAgentStatus: Decodable, Sendable, Equatable {
     let machine: FilmStudioAgentMachine
     let pi: FilmStudioAgentPi
+    let provider: FilmStudioAgentProvider
     let recommendedModelID: String?
     let models: [FilmStudioAgentModel]
 }
@@ -93,20 +101,31 @@ struct FilmStudioRuntimeStatus: Sendable, Equatable {
 
     var mereRunReady: Bool { mereRunPath != nil }
     var filmToolsReady: Bool { filmToolPath != nil }
+    var planningReady: Bool { mereRunReady && filmToolsReady }
+
     var piReady: Bool {
         if let pi = agentStatus?.pi { return pi.installed && pi.path != nil }
         return doctor?.check(named: "pi")?.ok == true
     }
+
     var ffmpegReady: Bool { doctor?.check(named: "ffmpeg")?.ok == true }
     var ffprobeReady: Bool { doctor?.check(named: "ffprobe")?.ok == true }
+    var mediaToolsReady: Bool { ffmpegReady && ffprobeReady }
     var agentModelReady: Bool { selectedAgentModel != nil }
+
+    var providerReady: Bool {
+        guard let provider = agentStatus?.provider,
+              provider.configured,
+              let selectedAgentModel else { return false }
+        return provider.modelID == selectedAgentModel.id
+    }
+
+    var agentReady: Bool {
+        planningReady && piReady && agentModelReady && providerReady
+    }
+
     var productionReady: Bool {
-        mereRunReady
-            && filmToolsReady
-            && piReady
-            && ffmpegReady
-            && ffprobeReady
-            && agentModelReady
+        agentReady && mediaToolsReady
     }
 
     var recommendedModel: FilmStudioAgentModel? {
@@ -119,6 +138,7 @@ enum FilmStudioServiceError: LocalizedError {
     case missingExecutable(String)
     case missingPi
     case missingAgentModel
+    case missingAgentProvider(String)
     case invalidResponse(String)
 
     var errorDescription: String? {
@@ -129,6 +149,8 @@ enum FilmStudioServiceError: LocalizedError {
             "Pi is not installed. Install it from Film Studio setup and retry."
         case .missingAgentModel:
             "No installed local agent model is ready for this Mac."
+        case .missingAgentProvider(let modelID):
+            "Pi's mere-run provider is not configured for \(modelID). Configure it from Film Studio setup and retry."
         case .invalidResponse(let message):
             "Film Studio returned an invalid response: \(message)"
         }
@@ -234,6 +256,15 @@ enum FilmStudioService {
     }
 
     @concurrent
+    static func configurePiProvider(mereRunExecutable: String, modelID: String) async throws {
+        let mereRun = try requireExecutable(mereRunExecutable)
+        _ = try await FilmToolClient(executable: mereRun.path).run(
+            ["agent", "onboard", "--configure-pi", "--model", modelID],
+            environment: processEnvironment()
+        )
+    }
+
+    @concurrent
     static func createFilm(
         idea: String,
         title: String,
@@ -245,29 +276,28 @@ enum FilmStudioService {
         try Task.checkCancellation()
         let filmTool = try requireExecutable(filmToolExecutable)
         let mereRun = try requireExecutable(mereRunExecutable)
-        let agentStatus = try await loadAgentStatus(mereRun: mereRun)
-        guard let piPath = agentStatus.pi.path, agentStatus.pi.installed else {
-            throw FilmStudioServiceError.missingPi
-        }
-        guard FilmStudioAgentSelector.select(from: agentStatus) != nil else {
-            throw FilmStudioServiceError.missingAgentModel
-        }
-
         let availableOutput = uniqueOutputDirectory(preferred: outputDirectory)
         try FileManager.default.createDirectory(
             at: availableOutput.deletingLastPathComponent(),
             withIntermediateDirectories: true
         )
+
+        var arguments = [
+            "plan",
+            "--idea", idea,
+            "--title", title,
+            "--duration", String(durationSeconds),
+            "--output-dir", availableOutput.path,
+            "--mere-run-command", mereRun.path,
+        ]
+        if let status = try? await loadAgentStatus(mereRun: mereRun),
+           status.pi.installed,
+           let piPath = status.pi.path {
+            arguments.append(contentsOf: ["--pi-command", piPath])
+        }
+
         let result = try await FilmToolClient(executable: filmTool.path).run(
-            [
-                "plan",
-                "--idea", idea,
-                "--title", title,
-                "--duration", String(durationSeconds),
-                "--output-dir", availableOutput.path,
-                "--pi-command", piPath,
-                "--mere-run-command", mereRun.path,
-            ],
+            arguments,
             environment: processEnvironment()
         )
         let response = try decode(PlanResponse.self, from: result.stdout)
@@ -395,6 +425,10 @@ enum FilmStudioService {
         return "\(shellQuote(mereRun)) agent onboard"
     }
 
+    static func stopManagedAgentServer() async {
+        await FilmStudioAgentServer.shared.stop()
+    }
+
     private static func agentContext(
         mereRunExecutable: String
     ) async throws -> (piPath: String, model: FilmStudioAgentModel) {
@@ -406,6 +440,15 @@ enum FilmStudioService {
         guard let model = FilmStudioAgentSelector.select(from: status) else {
             throw FilmStudioServiceError.missingAgentModel
         }
+        guard status.provider.configured, status.provider.modelID == model.id else {
+            throw FilmStudioServiceError.missingAgentProvider(model.id)
+        }
+        try await FilmStudioAgentServer.shared.ensureRunning(
+            mereRun: mereRun,
+            status: status,
+            model: model,
+            environment: processEnvironment()
+        )
         return (piPath, model)
     }
 
@@ -453,7 +496,7 @@ enum FilmStudioService {
         }
     }
 
-    private static func processEnvironment() -> [String: String] {
+    static func processEnvironment() -> [String: String] {
         var environment = ProcessInfo.processInfo.environment
         var pathComponents = (environment["PATH"] ?? "")
             .split(separator: ":")
