@@ -42,6 +42,7 @@ struct FilmStudioWorkspaceView: View {
     @State private var section: Section = .studio
     @State private var showingNewFilm = false
     @State private var showingBrief = false
+    @State private var showingProductionSettings = false
     @State private var rerollShot: FilmProductionShot?
 
     var body: some View {
@@ -71,6 +72,9 @@ struct FilmStudioWorkspaceView: View {
         }
         .sheet(isPresented: $showingBrief) {
             CompleteBriefSheet(model: model)
+        }
+        .sheet(isPresented: $showingProductionSettings) {
+            ProductionSettingsSheet(model: model)
         }
         .sheet(item: $rerollShot) { shot in
             RerollShotSheet(model: model, shot: shot)
@@ -458,6 +462,34 @@ struct FilmStudioWorkspaceView: View {
                     FilmStudioCard(title: "Treatment") {
                         Text(verbatim: "Approve the brief and continue production. GRACE will write the treatment before asking for the next approval.")
                             .foregroundStyle(AppTheme.Text.tertiaryColor)
+                    }
+                }
+
+                if snapshot.productionPlan != nil {
+                    FilmStudioCard(title: "Production execution") {
+                        VStack(alignment: .leading, spacing: AppTheme.Spacing.smMd) {
+                            HStack {
+                                Text(verbatim: "Mode")
+                                    .foregroundStyle(AppTheme.Text.tertiaryColor)
+                                Spacer(minLength: AppTheme.Spacing.md)
+                                Text(verbatim: model.displayName(snapshot.project.production.mode))
+                                    .font(.system(size: AppTheme.FontSize.smMd, weight: AppTheme.FontWeight.medium))
+                            }
+                            HStack {
+                                Text(verbatim: "Takes per shot")
+                                    .foregroundStyle(AppTheme.Text.tertiaryColor)
+                                Spacer(minLength: AppTheme.Spacing.md)
+                                Text(verbatim: String(snapshot.project.production.takesPerShot))
+                                    .font(.system(size: AppTheme.FontSize.smMd, weight: AppTheme.FontWeight.medium))
+                            }
+                            if model.pendingGate == "production" {
+                                Button(model.productionNeedsConfiguration ? "Configure & Check Models…" : "Change Production Settings…") {
+                                    showingProductionSettings = true
+                                }
+                                .buttonStyle(model.productionNeedsConfiguration ? .borderedProminent : .bordered)
+                                .disabled(model.isBusy || model.runtime?.filmToolsReady != true)
+                            }
+                        }
                     }
                 }
             }
@@ -855,6 +887,12 @@ struct FilmStudioWorkspaceView: View {
                 }
                 .buttonStyle(.borderedProminent)
                 .disabled(model.isBusy)
+            } else if model.productionNeedsConfiguration {
+                Button("Configure Production…") {
+                    showingProductionSettings = true
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(model.isBusy || model.runtime?.filmToolsReady != true)
             } else if let gate = model.pendingGate {
                 Button("Approve \(model.displayName(gate))") {
                     model.approvePendingGate()
@@ -863,7 +901,7 @@ struct FilmStudioWorkspaceView: View {
                 .disabled(!model.canApprove)
             }
 
-            if model.snapshot != nil, model.pendingGate == nil {
+            if model.snapshot != nil, model.pendingGate == nil, !model.isCompleted {
                 Button("Continue Production") {
                     if model.productionReady {
                         model.advance()
@@ -889,7 +927,7 @@ struct FilmStudioWorkspaceView: View {
                 }
                 .disabled(model.isBusy)
             }
-            if model.canReview {
+            if model.canReview, !model.isCompleted {
                 Button("Run Review") {
                     model.runReview()
                 }
@@ -919,7 +957,7 @@ struct FilmStudioWorkspaceView: View {
     }
 }
 
-private struct FilmStudioCard<Content: View>: View {
+struct FilmStudioCard<Content: View>: View {
     let title: String
     private let content: Content
 
@@ -943,266 +981,5 @@ private struct FilmStudioCard<Content: View>: View {
                 in: RoundedRectangle(cornerRadius: AppTheme.Radius.mdLg)
             )
         }
-    }
-}
-
-private struct NewFilmSheet: View {
-    @ObservedObject var model: PalmierFilmStudioModel
-    @Environment(\.dismiss) private var dismiss
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: AppTheme.Spacing.xl) {
-            VStack(alignment: .leading, spacing: AppTheme.Spacing.xs) {
-                Text(verbatim: "New Film")
-                    .font(.system(size: AppTheme.FontSize.title1, weight: AppTheme.FontWeight.semibold))
-                    .foregroundStyle(AppTheme.Text.primaryColor)
-                Text(verbatim: "Start with one sentence. GRACE will stop for your brief and creative approvals before production continues.")
-                    .font(.system(size: AppTheme.FontSize.md))
-                    .foregroundStyle(AppTheme.Text.tertiaryColor)
-            }
-
-            VStack(alignment: .leading, spacing: AppTheme.Spacing.xs) {
-                Text(verbatim: "Idea")
-                    .font(.system(size: AppTheme.FontSize.sm, weight: AppTheme.FontWeight.semibold))
-                    .foregroundStyle(AppTheme.Text.tertiaryColor)
-                TextEditor(text: $model.newFilmIdea)
-                    .font(.system(size: AppTheme.FontSize.mdLg))
-                    .frame(minHeight: AppTheme.Settings.skillRowIconFrame * 2)
-                    .padding(AppTheme.Spacing.smMd)
-                    .background(
-                        AppTheme.Background.raisedColor,
-                        in: RoundedRectangle(cornerRadius: AppTheme.Radius.md)
-                    )
-            }
-
-            HStack(alignment: .top, spacing: AppTheme.Spacing.lgXl) {
-                VStack(alignment: .leading, spacing: AppTheme.Spacing.xs) {
-                    Text(verbatim: "Working title")
-                        .font(.system(size: AppTheme.FontSize.sm, weight: AppTheme.FontWeight.semibold))
-                        .foregroundStyle(AppTheme.Text.tertiaryColor)
-                    TextField("Optional", text: $model.newFilmTitle)
-                        .textFieldStyle(.roundedBorder)
-                }
-                VStack(alignment: .leading, spacing: AppTheme.Spacing.xs) {
-                    Text(verbatim: "Target length")
-                        .font(.system(size: AppTheme.FontSize.sm, weight: AppTheme.FontWeight.semibold))
-                        .foregroundStyle(AppTheme.Text.tertiaryColor)
-                    Picker("Target length", selection: $model.newFilmDuration) {
-                        ForEach(model.durationOptions, id: \.self) { seconds in
-                            Text("\(seconds)s").tag(seconds)
-                        }
-                    }
-                    .labelsHidden()
-                }
-            }
-
-            VStack(alignment: .leading, spacing: AppTheme.Spacing.xs) {
-                Text(verbatim: "Location")
-                    .font(.system(size: AppTheme.FontSize.sm, weight: AppTheme.FontWeight.semibold))
-                    .foregroundStyle(AppTheme.Text.tertiaryColor)
-                HStack(spacing: AppTheme.Spacing.smMd) {
-                    Text(verbatim: model.newFilmProjectDirectory.path)
-                        .font(.system(size: AppTheme.FontSize.sm, design: .monospaced))
-                        .foregroundStyle(AppTheme.Text.tertiaryColor)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                    Spacer(minLength: AppTheme.Spacing.md)
-                    Button("Choose…") {
-                        model.chooseNewFilmDirectory()
-                    }
-                }
-                Text(verbatim: "If that folder already exists, Film Studio automatically uses the next available name.")
-                    .font(.system(size: AppTheme.FontSize.sm))
-                    .foregroundStyle(AppTheme.Text.mutedColor)
-            }
-
-            HStack(spacing: AppTheme.Spacing.smMd) {
-                Button("Cancel", role: .cancel) {
-                    dismiss()
-                }
-                Spacer(minLength: AppTheme.Spacing.md)
-                Button("Create Film") {
-                    model.createFilm()
-                    dismiss()
-                }
-                .buttonStyle(.borderedProminent)
-                .disabled(
-                    model.newFilmIdea.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                        || !model.canCreateFilm
-                )
-            }
-        }
-        .padding(AppTheme.Spacing.xxl)
-        .frame(width: AppTheme.Settings.contentMaxWidth)
-        .background(AppTheme.Background.baseColor)
-    }
-}
-
-private struct CompleteBriefSheet: View {
-    @ObservedObject var model: PalmierFilmStudioModel
-    @Environment(\.dismiss) private var dismiss
-
-    @State private var audience: String
-    @State private var genre: String
-    @State private var tone: String
-    @State private var rating: String
-    @State private var usage: String
-    @State private var references: String
-
-    private static let usageOptions = ["personal", "noncommercial", "commercial"]
-
-    init(model: PalmierFilmStudioModel) {
-        self.model = model
-        let brief = model.snapshot?.project.brief
-        _audience = State(initialValue: Self.clean(brief?.audience))
-        _genre = State(initialValue: Self.clean(brief?.genre))
-        _tone = State(initialValue: Self.clean(brief?.tone))
-        _rating = State(initialValue: Self.clean(brief?.rating))
-        let currentUsage = Self.clean(brief?.usage)
-        _usage = State(initialValue: Self.usageOptions.contains(currentUsage) ? currentUsage : "personal")
-        _references = State(initialValue: brief?.references.joined(separator: "\n") ?? "")
-    }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: AppTheme.Spacing.xl) {
-            VStack(alignment: .leading, spacing: AppTheme.Spacing.xs) {
-                Text(verbatim: "Complete Brief")
-                    .font(.system(size: AppTheme.FontSize.title1, weight: AppTheme.FontWeight.semibold))
-                Text(verbatim: "GRACE will not greenlight its own assumptions. Confirm the creative boundaries before approving the brief.")
-                    .font(.system(size: AppTheme.FontSize.md))
-                    .foregroundStyle(AppTheme.Text.tertiaryColor)
-            }
-
-            HStack(alignment: .top, spacing: AppTheme.Spacing.lgXl) {
-                briefField("Audience", text: $audience, placeholder: "Who is this for?")
-                briefField("Genre", text: $genre, placeholder: "Drama, comedy, documentary…")
-            }
-            HStack(alignment: .top, spacing: AppTheme.Spacing.lgXl) {
-                briefField("Tone", text: $tone, placeholder: "How should it feel?")
-                briefField("Rating", text: $rating, placeholder: "PG, family-safe, mature…")
-            }
-
-            VStack(alignment: .leading, spacing: AppTheme.Spacing.xs) {
-                Text(verbatim: "Intended use")
-                    .font(.system(size: AppTheme.FontSize.sm, weight: AppTheme.FontWeight.semibold))
-                    .foregroundStyle(AppTheme.Text.tertiaryColor)
-                Picker("Intended use", selection: $usage) {
-                    Text("Personal").tag("personal")
-                    Text("Noncommercial").tag("noncommercial")
-                    Text("Commercial").tag("commercial")
-                }
-                .labelsHidden()
-            }
-
-            VStack(alignment: .leading, spacing: AppTheme.Spacing.xs) {
-                Text(verbatim: "References")
-                    .font(.system(size: AppTheme.FontSize.sm, weight: AppTheme.FontWeight.semibold))
-                    .foregroundStyle(AppTheme.Text.tertiaryColor)
-                TextEditor(text: $references)
-                    .font(.system(size: AppTheme.FontSize.md))
-                    .frame(minHeight: AppTheme.Settings.skillRowIconFrame * 2)
-                    .padding(AppTheme.Spacing.smMd)
-                    .background(
-                        AppTheme.Background.raisedColor,
-                        in: RoundedRectangle(cornerRadius: AppTheme.Radius.md)
-                    )
-                Text(verbatim: "One reference per line. Leave blank to explicitly confirm there are no specific references.")
-                    .font(.system(size: AppTheme.FontSize.sm))
-                    .foregroundStyle(AppTheme.Text.mutedColor)
-            }
-
-            HStack(spacing: AppTheme.Spacing.smMd) {
-                Button("Cancel", role: .cancel) {
-                    dismiss()
-                }
-                Spacer(minLength: AppTheme.Spacing.md)
-                Button("Save Brief") {
-                    model.completeBrief(
-                        audience: audience,
-                        genre: genre,
-                        tone: tone,
-                        rating: rating,
-                        usage: usage,
-                        references: references
-                    )
-                    dismiss()
-                }
-                .buttonStyle(.borderedProminent)
-                .disabled(!isComplete || model.isBusy)
-            }
-        }
-        .padding(AppTheme.Spacing.xxl)
-        .frame(width: AppTheme.Settings.contentMaxWidth)
-        .background(AppTheme.Background.baseColor)
-    }
-
-    private func briefField(_ title: String, text: Binding<String>, placeholder: String) -> some View {
-        VStack(alignment: .leading, spacing: AppTheme.Spacing.xs) {
-            Text(verbatim: title)
-                .font(.system(size: AppTheme.FontSize.sm, weight: AppTheme.FontWeight.semibold))
-                .foregroundStyle(AppTheme.Text.tertiaryColor)
-            TextField(placeholder, text: text)
-                .textFieldStyle(.roundedBorder)
-        }
-        .frame(maxWidth: .infinity)
-    }
-
-    private var isComplete: Bool {
-        [audience, genre, tone, rating]
-            .allSatisfy { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
-    }
-
-    private static func clean(_ value: String?) -> String {
-        guard let value, value.lowercased() != "unspecified" else { return "" }
-        return value
-    }
-}
-
-private struct RerollShotSheet: View {
-    @ObservedObject var model: PalmierFilmStudioModel
-    let shot: FilmProductionShot
-    @Environment(\.dismiss) private var dismiss
-    @State private var note = ""
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: AppTheme.Spacing.xl) {
-            VStack(alignment: .leading, spacing: AppTheme.Spacing.xs) {
-                Text(verbatim: "Reroll \(shot.id)")
-                    .font(.system(size: AppTheme.FontSize.title1, weight: AppTheme.FontWeight.semibold))
-                Text(verbatim: shot.purpose)
-                    .font(.system(size: AppTheme.FontSize.md))
-                    .foregroundStyle(AppTheme.Text.tertiaryColor)
-            }
-
-            VStack(alignment: .leading, spacing: AppTheme.Spacing.xs) {
-                Text(verbatim: "What should change?")
-                    .font(.system(size: AppTheme.FontSize.sm, weight: AppTheme.FontWeight.semibold))
-                    .foregroundStyle(AppTheme.Text.tertiaryColor)
-                TextEditor(text: $note)
-                    .font(.system(size: AppTheme.FontSize.md))
-                    .frame(minHeight: AppTheme.Settings.skillRowIconFrame * 2)
-                    .padding(AppTheme.Spacing.smMd)
-                    .background(
-                        AppTheme.Background.raisedColor,
-                        in: RoundedRectangle(cornerRadius: AppTheme.Radius.md)
-                    )
-            }
-
-            HStack(spacing: AppTheme.Spacing.smMd) {
-                Button("Cancel", role: .cancel) {
-                    dismiss()
-                }
-                Spacer(minLength: AppTheme.Spacing.md)
-                Button("Prepare Reroll") {
-                    model.reroll(shotID: shot.id, note: note)
-                    dismiss()
-                }
-                .buttonStyle(.borderedProminent)
-                .disabled(note.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || model.isBusy)
-            }
-        }
-        .padding(AppTheme.Spacing.xxl)
-        .frame(width: AppTheme.Settings.contentMaxWidth)
-        .background(AppTheme.Background.baseColor)
     }
 }
