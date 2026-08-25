@@ -113,6 +113,11 @@ final class PalmierFilmStudioModel: ObservableObject {
         return snapshot.project.production.mode == "plan" || productionModelReadinessBlocked
     }
 
+    var needsHumanReviewDecision: Bool {
+        guard pendingGate == "picture-lock", let proof = snapshot?.project.proof else { return false }
+        return proof.review && !proof.humanReview
+    }
+
     var productionReady: Bool { runtime?.productionReady == true }
     var canCreateFilm: Bool { productionReady && !isBusy }
     var canApprove: Bool {
@@ -120,6 +125,7 @@ final class PalmierFilmStudioModel: ObservableObject {
             && pendingGate != nil
             && !briefNeedsInput
             && !productionNeedsConfiguration
+            && !needsHumanReviewDecision
             && runtime?.filmToolsReady == true
             && !isBusy
     }
@@ -130,8 +136,19 @@ final class PalmierFilmStudioModel: ObservableObject {
             && !isCompleted
             && !isBusy
     }
-    var canReview: Bool { snapshot != nil && playableCutURL != nil && productionReady && !isBusy }
-    var canReroll: Bool { snapshot != nil && runtime?.filmToolsReady == true && !isBusy }
+    var canReview: Bool {
+        snapshot != nil
+            && playableCutURL != nil
+            && productionReady
+            && !isCompleted
+            && !isBusy
+    }
+    var canReroll: Bool {
+        snapshot != nil
+            && runtime?.filmToolsReady == true
+            && !isCompleted
+            && !isBusy
+    }
     var hasInterruptedWork: Bool {
         snapshot?.project.jobs.contains { $0.status == "running" } == true
     }
@@ -406,6 +423,39 @@ final class PalmierFilmStudioModel: ObservableObject {
         }
     }
 
+    func recordReviewDecision(
+        decision: String,
+        note: String,
+        rerolls: [FilmStudioReviewReroll]
+    ) {
+        guard !isBusy,
+              pendingGate == "picture-lock",
+              let runManifest = snapshot?.runManifest,
+              let filmToolPath = runtime?.filmToolPath else { return }
+        let reviewer = NSFullUserName().isEmpty ? "macOS user" : NSFullUserName()
+        beginActivity(decision == "approve" ? "Recording cut approval…" : "Recording revision request…")
+        commandTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            defer { self.endActivity() }
+            do {
+                try await FilmStudioService.recordReviewDecision(
+                    runManifest: runManifest,
+                    decision: decision,
+                    reviewer: reviewer,
+                    note: note,
+                    rerolls: rerolls,
+                    filmToolPath: filmToolPath
+                )
+                await self.reloadCurrentProject(reportErrors: true)
+                self.noticeMessage = decision == "approve"
+                    ? "Human review is recorded against this exact cut. Picture lock is ready for approval."
+                    : "Revision requests are recorded. Prepare each requested reroll before continuing."
+            } catch {
+                self.errorMessage = error.localizedDescription
+            }
+        }
+    }
+
     func approvePendingGate() {
         guard canApprove,
               let runManifest = snapshot?.runManifest,
@@ -475,7 +525,7 @@ final class PalmierFilmStudioModel: ObservableObject {
                     mereRunExecutable: mereRunExecutable
                 )
                 await self.reloadCurrentProject(reportErrors: true)
-                self.noticeMessage = "Review finished. Check the findings before approving picture lock."
+                self.noticeMessage = "Review finished. Watch the cut and record your human review decision before picture lock."
             } catch {
                 self.errorMessage = error.localizedDescription
                 await self.reloadCurrentProject(reportErrors: false)
@@ -501,7 +551,7 @@ final class PalmierFilmStudioModel: ObservableObject {
                     filmToolExecutable: filmToolExecutable
                 )
                 await self.reloadCurrentProject(reportErrors: true)
-                self.noticeMessage = "\(shotID) is queued for a targeted reroll. Continue production when ready."
+                self.noticeMessage = "\(shotID) is prepared for a targeted reroll. Continue production when the review requests are resolved."
             } catch {
                 self.errorMessage = error.localizedDescription
             }
