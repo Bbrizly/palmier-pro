@@ -10,19 +10,13 @@ struct NewFilmSheet: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: AppTheme.Spacing.xl) {
-            VStack(alignment: .leading, spacing: AppTheme.Spacing.xs) {
-                Text(verbatim: "New Film")
-                    .font(.system(size: AppTheme.FontSize.title1, weight: AppTheme.FontWeight.semibold))
-                    .foregroundStyle(AppTheme.Text.primaryColor)
-                Text(verbatim: "Start with one sentence. GRACE will stop for your brief and creative approvals before production continues.")
-                    .font(.system(size: AppTheme.FontSize.md))
-                    .foregroundStyle(AppTheme.Text.tertiaryColor)
-            }
+            sheetHeading(
+                "New Film",
+                "Start with one sentence. GRACE will stop for your brief and creative approvals before production continues."
+            )
 
             VStack(alignment: .leading, spacing: AppTheme.Spacing.xs) {
-                Text(verbatim: "Idea")
-                    .font(.system(size: AppTheme.FontSize.sm, weight: AppTheme.FontWeight.semibold))
-                    .foregroundStyle(AppTheme.Text.tertiaryColor)
+                fieldLabel("Idea")
                 TextEditor(text: $model.newFilmIdea)
                     .font(.system(size: AppTheme.FontSize.mdLg))
                     .frame(minHeight: AppTheme.Settings.skillRowIconFrame * 2)
@@ -31,33 +25,35 @@ struct NewFilmSheet: View {
                         AppTheme.Background.raisedColor,
                         in: RoundedRectangle(cornerRadius: AppTheme.Radius.md)
                     )
+                    .disabled(model.isBusy)
             }
 
             HStack(alignment: .top, spacing: AppTheme.Spacing.lgXl) {
                 VStack(alignment: .leading, spacing: AppTheme.Spacing.xs) {
-                    Text(verbatim: "Working title")
-                        .font(.system(size: AppTheme.FontSize.sm, weight: AppTheme.FontWeight.semibold))
-                        .foregroundStyle(AppTheme.Text.tertiaryColor)
-                    TextField("Optional", text: $model.newFilmTitle)
+                    fieldLabel("Working title")
+                    FilmStudioTextField("Optional", text: $model.newFilmTitle)
                         .textFieldStyle(.roundedBorder)
+                        .disabled(model.isBusy)
                 }
+                .frame(maxWidth: .infinity)
+
                 VStack(alignment: .leading, spacing: AppTheme.Spacing.xs) {
-                    Text(verbatim: "Target length")
-                        .font(.system(size: AppTheme.FontSize.sm, weight: AppTheme.FontWeight.semibold))
-                        .foregroundStyle(AppTheme.Text.tertiaryColor)
-                    Picker("Target length", selection: $model.newFilmDuration) {
+                    fieldLabel("Target length")
+                    Picker(selection: $model.newFilmDuration) {
                         ForEach(model.durationOptions, id: \.self) { seconds in
-                            Text("\(seconds)s").tag(seconds)
+                            Text(verbatim: "\(seconds)s").tag(seconds)
                         }
+                    } label: {
+                        Text(verbatim: "Target length")
                     }
                     .labelsHidden()
+                    .disabled(model.isBusy)
                 }
+                .frame(maxWidth: .infinity)
             }
 
             VStack(alignment: .leading, spacing: AppTheme.Spacing.xs) {
-                Text(verbatim: "Location")
-                    .font(.system(size: AppTheme.FontSize.sm, weight: AppTheme.FontWeight.semibold))
-                    .foregroundStyle(AppTheme.Text.tertiaryColor)
+                fieldLabel("Location")
                 HStack(spacing: AppTheme.Spacing.smMd) {
                     Text(verbatim: model.newFilmProjectDirectory.path)
                         .font(.system(size: AppTheme.FontSize.sm, design: .monospaced))
@@ -65,10 +61,8 @@ struct NewFilmSheet: View {
                         .lineLimit(1)
                         .truncationMode(.middle)
                     Spacer(minLength: AppTheme.Spacing.md)
-                    Button("Choose…") {
-                        model.chooseNewFilmDirectory()
-                    }
-                    .disabled(model.isBusy)
+                    FilmStudioButton("Choose…") { model.chooseNewFilmDirectory() }
+                        .disabled(model.isBusy)
                 }
                 Text(verbatim: "If that folder already exists, Film Studio automatically uses the next available name.")
                     .font(.system(size: AppTheme.FontSize.sm))
@@ -78,10 +72,10 @@ struct NewFilmSheet: View {
             FilmStudioSheetError(model: model, submitted: submitted)
 
             HStack(spacing: AppTheme.Spacing.smMd) {
-                Button("Cancel", role: .cancel) { dismiss() }
+                FilmStudioButton("Cancel", role: .cancel) { dismiss() }
                     .disabled(model.isBusy)
                 Spacer(minLength: AppTheme.Spacing.md)
-                Button(model.isBusy && submitted ? "Creating…" : "Create Film") {
+                FilmStudioButton(model.isBusy && submitted ? "Creating…" : "Create Film") {
                     submitted = true
                     model.createFilm()
                 }
@@ -96,13 +90,9 @@ struct NewFilmSheet: View {
         .frame(width: AppTheme.Settings.contentMaxWidth)
         .background(AppTheme.Background.baseColor)
         .onChange(of: model.isBusy) { _, busy in
-            dismissAfterSuccessfulSubmission(busy: busy)
+            guard submitted, !busy, model.errorMessage == nil else { return }
+            dismiss()
         }
-    }
-
-    private func dismissAfterSuccessfulSubmission(busy: Bool) {
-        guard submitted, !busy, model.errorMessage == nil else { return }
-        dismiss()
     }
 }
 
@@ -135,13 +125,10 @@ struct CompleteBriefSheet: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: AppTheme.Spacing.xl) {
-            VStack(alignment: .leading, spacing: AppTheme.Spacing.xs) {
-                Text(verbatim: "Complete Brief")
-                    .font(.system(size: AppTheme.FontSize.title1, weight: AppTheme.FontWeight.semibold))
-                Text(verbatim: "GRACE will not greenlight its own assumptions. Confirm the creative boundaries before approving the brief.")
-                    .font(.system(size: AppTheme.FontSize.md))
-                    .foregroundStyle(AppTheme.Text.tertiaryColor)
-            }
+            sheetHeading(
+                "Complete Brief",
+                "Confirm the creative boundaries before approving the brief."
+            )
 
             HStack(alignment: .top, spacing: AppTheme.Spacing.lgXl) {
                 briefField("Audience", text: $audience, placeholder: "Who is this for?")
@@ -153,21 +140,20 @@ struct CompleteBriefSheet: View {
             }
 
             VStack(alignment: .leading, spacing: AppTheme.Spacing.xs) {
-                Text(verbatim: "Intended use")
-                    .font(.system(size: AppTheme.FontSize.sm, weight: AppTheme.FontWeight.semibold))
-                    .foregroundStyle(AppTheme.Text.tertiaryColor)
-                Picker("Intended use", selection: $usage) {
-                    Text("Personal").tag("personal")
-                    Text("Noncommercial").tag("noncommercial")
-                    Text("Commercial").tag("commercial")
+                fieldLabel("Intended use")
+                Picker(selection: $usage) {
+                    Text(verbatim: "Personal").tag("personal")
+                    Text(verbatim: "Noncommercial").tag("noncommercial")
+                    Text(verbatim: "Commercial").tag("commercial")
+                } label: {
+                    Text(verbatim: "Intended use")
                 }
                 .labelsHidden()
+                .disabled(model.isBusy)
             }
 
             VStack(alignment: .leading, spacing: AppTheme.Spacing.xs) {
-                Text(verbatim: "References")
-                    .font(.system(size: AppTheme.FontSize.sm, weight: AppTheme.FontWeight.semibold))
-                    .foregroundStyle(AppTheme.Text.tertiaryColor)
+                fieldLabel("References")
                 TextEditor(text: $references)
                     .font(.system(size: AppTheme.FontSize.md))
                     .frame(minHeight: AppTheme.Settings.skillRowIconFrame * 2)
@@ -176,6 +162,7 @@ struct CompleteBriefSheet: View {
                         AppTheme.Background.raisedColor,
                         in: RoundedRectangle(cornerRadius: AppTheme.Radius.md)
                     )
+                    .disabled(model.isBusy)
                 Text(verbatim: "One reference per line. Leave blank to explicitly confirm there are no specific references.")
                     .font(.system(size: AppTheme.FontSize.sm))
                     .foregroundStyle(AppTheme.Text.mutedColor)
@@ -184,10 +171,10 @@ struct CompleteBriefSheet: View {
             FilmStudioSheetError(model: model, submitted: submitted)
 
             HStack(spacing: AppTheme.Spacing.smMd) {
-                Button("Cancel", role: .cancel) { dismiss() }
+                FilmStudioButton("Cancel", role: .cancel) { dismiss() }
                     .disabled(model.isBusy)
                 Spacer(minLength: AppTheme.Spacing.md)
-                Button(model.isBusy && submitted ? "Saving…" : "Save Brief") {
+                FilmStudioButton(model.isBusy && submitted ? "Saving…" : "Save Brief") {
                     submitted = true
                     model.completeBrief(
                         audience: audience,
@@ -213,10 +200,8 @@ struct CompleteBriefSheet: View {
 
     private func briefField(_ title: String, text: Binding<String>, placeholder: String) -> some View {
         VStack(alignment: .leading, spacing: AppTheme.Spacing.xs) {
-            Text(verbatim: title)
-                .font(.system(size: AppTheme.FontSize.sm, weight: AppTheme.FontWeight.semibold))
-                .foregroundStyle(AppTheme.Text.tertiaryColor)
-            TextField(placeholder, text: text)
+            fieldLabel(title)
+            FilmStudioTextField(placeholder, text: text)
                 .textFieldStyle(.roundedBorder)
                 .disabled(model.isBusy)
         }
@@ -252,54 +237,51 @@ struct ProductionSettingsSheet: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: AppTheme.Spacing.xl) {
-            VStack(alignment: .leading, spacing: AppTheme.Spacing.xs) {
-                Text(verbatim: "Production Settings")
-                    .font(.system(size: AppTheme.FontSize.title1, weight: AppTheme.FontWeight.semibold))
-                Text(verbatim: "Choose the render cost before approving production. GRACE will run a model preflight without generating media.")
-                    .font(.system(size: AppTheme.FontSize.md))
-                    .foregroundStyle(AppTheme.Text.tertiaryColor)
-            }
+            sheetHeading(
+                "Production Settings",
+                "Choose the render cost before approving production. Saving runs model preflight without generating media."
+            )
 
             VStack(alignment: .leading, spacing: AppTheme.Spacing.smMd) {
-                Text(verbatim: "Render mode")
-                    .font(.system(size: AppTheme.FontSize.sm, weight: AppTheme.FontWeight.semibold))
-                    .foregroundStyle(AppTheme.Text.tertiaryColor)
-                Picker("Render mode", selection: $mode) {
-                    Text("Draft — faster iteration").tag("draft")
-                    Text("Final — full-quality render").tag("final")
+                fieldLabel("Render mode")
+                Picker(selection: $mode) {
+                    Text(verbatim: "Draft — faster iteration").tag("draft")
+                    Text(verbatim: "Final — full-quality render").tag("final")
+                } label: {
+                    Text(verbatim: "Render mode")
                 }
                 .pickerStyle(.segmented)
                 .labelsHidden()
                 .disabled(model.isBusy)
                 Text(verbatim: mode == "draft"
-                    ? "Uses draft video settings and video-only shot renders where GRACE supports them. Best for the first complete cut."
-                    : "Uses final-quality media settings and audio-video shot renders. Use when you are ready to spend the full local compute budget.")
+                    ? "Use draft settings for the first complete cut and faster iteration."
+                    : "Use final-quality media settings when the production plan is ready for the full local compute budget.")
                     .font(.system(size: AppTheme.FontSize.sm))
                     .foregroundStyle(AppTheme.Text.tertiaryColor)
             }
 
             VStack(alignment: .leading, spacing: AppTheme.Spacing.smMd) {
-                Text(verbatim: "Takes per shot")
-                    .font(.system(size: AppTheme.FontSize.sm, weight: AppTheme.FontWeight.semibold))
-                    .foregroundStyle(AppTheme.Text.tertiaryColor)
-                Picker("Takes per shot", selection: $takesPerShot) {
+                fieldLabel("Takes per shot")
+                Picker(selection: $takesPerShot) {
                     ForEach(1...4, id: \.self) { count in
-                        Text("\(count)").tag(count)
+                        Text(verbatim: "\(count)").tag(count)
                     }
+                } label: {
+                    Text(verbatim: "Takes per shot")
                 }
                 .pickerStyle(.segmented)
                 .labelsHidden()
                 .disabled(model.isBusy)
                 Text(verbatim: takesPerShot == 1
                     ? "One candidate per shot. Lowest compute and storage use."
-                    : "GRACE generates \(takesPerShot) candidates per shot and selects among them. Compute and storage increase roughly with the number of takes.")
+                    : "Generate \(takesPerShot) candidates per shot and select among them. Compute and storage scale with the number of takes.")
                     .font(.system(size: AppTheme.FontSize.sm))
                     .foregroundStyle(AppTheme.Text.tertiaryColor)
             }
 
             if model.productionModelReadinessBlocked {
-                Label(
-                    "The previous model preflight failed. Saving again reruns preflight after you install or change the required models.",
+                FilmStudioLabel(
+                    "The previous model preflight failed. Saving again reruns it after the required models are available.",
                     systemImage: "exclamationmark.triangle"
                 )
                 .font(.system(size: AppTheme.FontSize.sm))
@@ -309,10 +291,10 @@ struct ProductionSettingsSheet: View {
             FilmStudioSheetError(model: model, submitted: submitted)
 
             HStack(spacing: AppTheme.Spacing.smMd) {
-                Button("Cancel", role: .cancel) { dismiss() }
+                FilmStudioButton("Cancel", role: .cancel) { dismiss() }
                     .disabled(model.isBusy)
                 Spacer(minLength: AppTheme.Spacing.md)
-                Button(model.isBusy && submitted ? "Checking Models…" : "Save & Check Models") {
+                FilmStudioButton(model.isBusy && submitted ? "Checking Models…" : "Save & Check Models") {
                     submitted = true
                     model.configureProduction(mode: mode, takesPerShot: takesPerShot)
                 }
@@ -347,34 +329,31 @@ struct HumanReviewSheet: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: AppTheme.Spacing.xl) {
-            VStack(alignment: .leading, spacing: AppTheme.Spacing.xs) {
-                Text(verbatim: "Human Review")
-                    .font(.system(size: AppTheme.FontSize.title1, weight: AppTheme.FontWeight.semibold))
-                Text(verbatim: "Your decision is bound to the exact current cut and review evidence. Changing the cut later invalidates this approval.")
-                    .font(.system(size: AppTheme.FontSize.md))
-                    .foregroundStyle(AppTheme.Text.tertiaryColor)
-            }
+            sheetHeading(
+                "Human Review",
+                "Your decision is bound to the exact current cut and its review evidence. Changing the cut invalidates this approval."
+            )
 
-            Picker("Decision", selection: $decision) {
-                Text("Approve Cut").tag("approve")
-                Text("Request Revisions").tag("revise")
+            Picker(selection: $decision) {
+                Text(verbatim: "Approve Cut").tag("approve")
+                Text(verbatim: "Request Revisions").tag("revise")
+            } label: {
+                Text(verbatim: "Decision")
             }
             .pickerStyle(.segmented)
             .labelsHidden()
             .disabled(model.isBusy)
 
             if decision == "approve" {
-                Label(
-                    "I reviewed the current playable cut and the recorded review evidence and approve this exact version for picture lock.",
+                FilmStudioLabel(
+                    "I reviewed the current cut and approve this exact version for picture lock.",
                     systemImage: "checkmark.seal"
                 )
                 .font(.system(size: AppTheme.FontSize.md))
                 .foregroundStyle(AppTheme.Text.secondaryColor)
             } else {
                 VStack(alignment: .leading, spacing: AppTheme.Spacing.smMd) {
-                    Text(verbatim: "Shots to revise")
-                        .font(.system(size: AppTheme.FontSize.sm, weight: AppTheme.FontWeight.semibold))
-                        .foregroundStyle(AppTheme.Text.tertiaryColor)
+                    fieldLabel("Shots to revise")
                     ScrollView {
                         LazyVStack(alignment: .leading, spacing: AppTheme.Spacing.smMd) {
                             ForEach(shots) { shot in
@@ -382,16 +361,23 @@ struct HumanReviewSheet: View {
                                     Toggle(isOn: shotSelection(shot.id)) {
                                         HStack(alignment: .firstTextBaseline, spacing: AppTheme.Spacing.smMd) {
                                             Text(verbatim: shot.id)
-                                                .font(.system(size: AppTheme.FontSize.sm, weight: AppTheme.FontWeight.semibold, design: .monospaced))
+                                                .font(.system(
+                                                    size: AppTheme.FontSize.sm,
+                                                    weight: AppTheme.FontWeight.semibold,
+                                                    design: .monospaced
+                                                ))
                                             Text(verbatim: shot.purpose)
                                                 .lineLimit(1)
                                         }
                                     }
                                     .disabled(model.isBusy)
                                     if selectedShotIDs.contains(shot.id) {
-                                        TextField("What should change in this shot?", text: shotNote(shot.id))
-                                            .textFieldStyle(.roundedBorder)
-                                            .disabled(model.isBusy)
+                                        FilmStudioTextField(
+                                            "What should change in this shot?",
+                                            text: shotNote(shot.id)
+                                        )
+                                        .textFieldStyle(.roundedBorder)
+                                        .disabled(model.isBusy)
                                     }
                                 }
                                 .padding(AppTheme.Spacing.smMd)
@@ -405,9 +391,7 @@ struct HumanReviewSheet: View {
                     .frame(maxHeight: AppTheme.Settings.skillDetailMinHeight / 2)
 
                     VStack(alignment: .leading, spacing: AppTheme.Spacing.xs) {
-                        Text(verbatim: "Overall note")
-                            .font(.system(size: AppTheme.FontSize.sm, weight: AppTheme.FontWeight.semibold))
-                            .foregroundStyle(AppTheme.Text.tertiaryColor)
+                        fieldLabel("Overall note")
                         TextEditor(text: $generalNote)
                             .frame(minHeight: AppTheme.Settings.skillRowIconFrame * 1.5)
                             .padding(AppTheme.Spacing.smMd)
@@ -423,10 +407,10 @@ struct HumanReviewSheet: View {
             FilmStudioSheetError(model: model, submitted: submitted)
 
             HStack(spacing: AppTheme.Spacing.smMd) {
-                Button("Cancel", role: .cancel) { dismiss() }
+                FilmStudioButton("Cancel", role: .cancel) { dismiss() }
                     .disabled(model.isBusy)
                 Spacer(minLength: AppTheme.Spacing.md)
-                Button(submitTitle) {
+                FilmStudioButton(submitTitle) {
                     submitted = true
                     model.recordReviewDecision(
                         decision: decision,
@@ -503,18 +487,10 @@ struct RerollShotSheet: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: AppTheme.Spacing.xl) {
-            VStack(alignment: .leading, spacing: AppTheme.Spacing.xs) {
-                Text(verbatim: "Reroll \(shot.id)")
-                    .font(.system(size: AppTheme.FontSize.title1, weight: AppTheme.FontWeight.semibold))
-                Text(verbatim: shot.purpose)
-                    .font(.system(size: AppTheme.FontSize.md))
-                    .foregroundStyle(AppTheme.Text.tertiaryColor)
-            }
+            sheetHeading("Reroll \(shot.id)", shot.purpose)
 
             VStack(alignment: .leading, spacing: AppTheme.Spacing.xs) {
-                Text(verbatim: "What should change?")
-                    .font(.system(size: AppTheme.FontSize.sm, weight: AppTheme.FontWeight.semibold))
-                    .foregroundStyle(AppTheme.Text.tertiaryColor)
+                fieldLabel("What should change?")
                 TextEditor(text: $note)
                     .font(.system(size: AppTheme.FontSize.md))
                     .frame(minHeight: AppTheme.Settings.skillRowIconFrame * 2)
@@ -529,10 +505,10 @@ struct RerollShotSheet: View {
             FilmStudioSheetError(model: model, submitted: submitted)
 
             HStack(spacing: AppTheme.Spacing.smMd) {
-                Button("Cancel", role: .cancel) { dismiss() }
+                FilmStudioButton("Cancel", role: .cancel) { dismiss() }
                     .disabled(model.isBusy)
                 Spacer(minLength: AppTheme.Spacing.md)
-                Button(model.isBusy && submitted ? "Preparing…" : "Prepare Reroll") {
+                FilmStudioButton(model.isBusy && submitted ? "Preparing…" : "Prepare Reroll") {
                     submitted = true
                     model.reroll(shotID: shot.id, note: note)
                 }
@@ -557,11 +533,30 @@ private struct FilmStudioSheetError: View {
 
     var body: some View {
         if submitted, let error = model.errorMessage {
-            Label(error, systemImage: "exclamationmark.triangle.fill")
+            FilmStudioLabel(error, systemImage: "exclamationmark.triangle.fill")
                 .font(.system(size: AppTheme.FontSize.sm))
                 .foregroundStyle(AppTheme.Status.errorColor)
                 .textSelection(.enabled)
                 .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
+}
+
+@MainActor
+private func sheetHeading(_ title: String, _ subtitle: String) -> some View {
+    VStack(alignment: .leading, spacing: AppTheme.Spacing.xs) {
+        Text(verbatim: title)
+            .font(.system(size: AppTheme.FontSize.title1, weight: AppTheme.FontWeight.semibold))
+            .foregroundStyle(AppTheme.Text.primaryColor)
+        Text(verbatim: subtitle)
+            .font(.system(size: AppTheme.FontSize.md))
+            .foregroundStyle(AppTheme.Text.tertiaryColor)
+    }
+}
+
+@MainActor
+private func fieldLabel(_ title: String) -> some View {
+    Text(verbatim: title)
+        .font(.system(size: AppTheme.FontSize.sm, weight: AppTheme.FontWeight.semibold))
+        .foregroundStyle(AppTheme.Text.tertiaryColor)
 }
