@@ -21,6 +21,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         _ = Updater.shared
 
         HomeWindowController.shared.showWindow(nil)
+        FilmStudioIntegration.installMenuItem()
         SkillStore.shared.startSkillSync()
         Task.detached(priority: .utility) {
             Project.ensureStorageDirectory()
@@ -82,12 +83,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         return .terminateLater
     }
 
-    func restart() {
-        guard !isTerminating else { return }
-        restartRequested = true
-        NSApp.terminate(nil)
-    }
-
     @concurrent
     private static func scheduleRelaunch(applicationURL: URL, processID: Int32) async throws {
         let process = Process()
@@ -100,6 +95,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             applicationURL.path,
         ]
         try process.run()
+    }
+
+    func restart() {
+        guard !isTerminating else { return }
+        restartRequested = true
+        NSApp.terminate(nil)
     }
 
     func application(_ application: NSApplication, open urls: [URL]) {
