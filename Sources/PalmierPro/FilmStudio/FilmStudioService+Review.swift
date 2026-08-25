@@ -19,8 +19,14 @@ extension FilmStudioService {
         guard decision == "approve" || decision == "revise" else {
             throw FilmStudioServiceError.invalidResponse("Review decision must be approve or revise.")
         }
+        if decision == "approve", !rerolls.isEmpty {
+            throw FilmStudioServiceError.invalidResponse("An approved cut cannot include reroll requests.")
+        }
         if decision == "revise", rerolls.isEmpty {
-            throw FilmStudioServiceError.invalidResponse("Choose at least one shot to revise.")
+            throw FilmStudioServiceError.invalidResponse("Choose at least one shot to revise so the workflow has an actionable next step.")
+        }
+        guard rerolls.allSatisfy({ !$0.shotID.isEmpty && !$0.note.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }) else {
+            throw FilmStudioServiceError.invalidResponse("Every reroll request needs a shot and a specific revision note.")
         }
 
         var arguments = [
@@ -34,26 +40,7 @@ extension FilmStudioService {
         }
         _ = try await FilmToolClient(executable: filmToolPath).run(
             arguments,
-            environment: reviewProcessEnvironment()
+            environment: processEnvironment()
         )
-    }
-
-    private static func reviewProcessEnvironment() -> [String: String] {
-        var environment = ProcessInfo.processInfo.environment
-        var pathComponents = (environment["PATH"] ?? "")
-            .split(separator: ":")
-            .map(String.init)
-        let additions = [
-            FileManager.default.homeDirectoryForCurrentUser.appending(path: ".local/bin").path,
-            "/opt/homebrew/bin",
-            "/usr/local/bin",
-            "/usr/bin",
-            "/bin",
-        ]
-        for addition in additions where !pathComponents.contains(addition) {
-            pathComponents.append(addition)
-        }
-        environment["PATH"] = pathComponents.joined(separator: ":")
-        return environment
     }
 }
