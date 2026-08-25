@@ -66,6 +66,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                         processID: ProcessInfo.processInfo.processIdentifier
                     )
                 }
+                await FilmStudioService.stopManagedAgentServer()
                 await SkillStore.shared.prepareForTermination()
                 if !MLXRuntime.beginTermination() {
                     await MLXRuntime.waitUntilIdle()
