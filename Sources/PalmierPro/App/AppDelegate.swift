@@ -153,6 +153,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @MainActor
+    @objc func showOnboarding(_ sender: Any?) {
+        AppState.shared.showHome()
+        OnboardingStore.shared.replay()
+        HomeWindowController.shared.window?.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+    }
+
+    @MainActor
     @objc func showKeyboardShortcuts(_ sender: Any?) {
         HelpWindowController.shared.show(tab: .shortcuts)
     }
