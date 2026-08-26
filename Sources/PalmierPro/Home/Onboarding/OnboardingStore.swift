@@ -8,7 +8,6 @@ final class OnboardingStore {
 
     private(set) var step = OnboardingStep.welcome
     private(set) var isComplete: Bool
-    private(set) var selectedWorkflow: OnboardingWorkflow?
 
     private let defaults: UserDefaults
 
@@ -39,10 +38,6 @@ final class OnboardingStore {
         step = destination
     }
 
-    func selectWorkflow(_ workflow: OnboardingWorkflow) {
-        selectedWorkflow = workflow
-    }
-
     func complete() {
         defaults.set(true, forKey: Self.completionKey)
         isComplete = true
@@ -54,7 +49,6 @@ final class OnboardingStore {
 
     func replay() {
         step = .welcome
-        selectedWorkflow = nil
         isComplete = false
     }
 
