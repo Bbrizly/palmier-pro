@@ -21,6 +21,7 @@ struct OnboardingOverlay: View {
             reduceMotion ? nil : .easeInOut(duration: AppTheme.Anim.transition),
             value: onboarding.step
         )
+        .onExitCommand(perform: onboarding.skip)
     }
 
     private var card: some View {
@@ -78,37 +79,41 @@ struct OnboardingOverlay: View {
     }
 
     private var content: some View {
-        Group {
-            switch onboarding.step {
-            case .welcome:
-                OnboardingWelcomeStep()
-            case .understanding:
-                OnboardingUnderstandingStep()
-            case .sharedTimeline:
-                OnboardingSharedTimelineStep()
-            case .direction:
-                OnboardingDirectionStep()
-            case .personalization:
-                OnboardingPersonalizationStep()
-            case .compute:
-                OnboardingComputeStep(onOpenSetup: onboarding.openComputeSetup)
-            case .workflows:
-                OnboardingWorkflowsStep()
+        ScrollView {
+            Group {
+                switch onboarding.step {
+                case .welcome:
+                    OnboardingWelcomeStep()
+                case .understanding:
+                    OnboardingUnderstandingStep()
+                case .sharedTimeline:
+                    OnboardingSharedTimelineStep()
+                case .direction:
+                    OnboardingDirectionStep()
+                case .personalization:
+                    OnboardingPersonalizationStep()
+                case .compute:
+                    OnboardingComputeStep(onOpenSetup: onboarding.openComputeSetup)
+                case .workflows:
+                    OnboardingWorkflowsStep()
+                }
             }
+            .id(onboarding.step)
+            .frame(maxWidth: AppTheme.Onboarding.contentMaxWidth, alignment: .topLeading)
+            .padding(.horizontal, AppTheme.Spacing.xxl)
+            .padding(.vertical, AppTheme.Spacing.xl)
+            .frame(maxWidth: .infinity, alignment: .top)
+            .transition(
+                reduceMotion
+                    ? .opacity
+                    : .asymmetric(
+                        insertion: .move(edge: .trailing).combined(with: .opacity),
+                        removal: .move(edge: .leading).combined(with: .opacity)
+                    )
+            )
         }
-        .id(onboarding.step)
-        .frame(maxWidth: AppTheme.Onboarding.contentMaxWidth, maxHeight: .infinity, alignment: .topLeading)
-        .padding(.horizontal, AppTheme.Spacing.xxl)
-        .padding(.vertical, AppTheme.Spacing.xl)
+        .scrollIndicators(.automatic)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .transition(
-            reduceMotion
-                ? .opacity
-                : .asymmetric(
-                    insertion: .move(edge: .trailing).combined(with: .opacity),
-                    removal: .move(edge: .leading).combined(with: .opacity)
-                )
-        )
     }
 
     private var footer: some View {
