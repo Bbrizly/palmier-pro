@@ -102,11 +102,11 @@ enum MainMenuBuilder {
 
         menu.addItem(.separator())
 
-        let deleteItem = NSMenuItem(title: L10n.string("Delete"), action: #selector(EditorActions.deleteSelectedClips(_:)), keyEquivalent: "\u{8}") // backspace
+        let deleteItem = NSMenuItem(title: L10n.string("Delete"), action: #selector(EditorActions.deleteSelectedClips(_:)), keyEquivalent: "\u{8}")
         deleteItem.keyEquivalentModifierMask = []
         menu.addItem(deleteItem)
 
-        let rippleDeleteItem = NSMenuItem(title: L10n.string("Ripple Delete"), action: #selector(EditorActions.rippleDeleteSelected(_:)), keyEquivalent: "\u{8}") // backspace
+        let rippleDeleteItem = NSMenuItem(title: L10n.string("Ripple Delete"), action: #selector(EditorActions.rippleDeleteSelected(_:)), keyEquivalent: "\u{8}")
         rippleDeleteItem.keyEquivalentModifierMask = [.shift]
         menu.addItem(rippleDeleteItem)
 
@@ -181,7 +181,23 @@ enum MainMenuBuilder {
     private static func helpMenu() -> NSMenuItem {
         let item = NSMenuItem()
         let menu = NSMenu(title: L10n.string("Help"))
-        menu.addItem(withTitle: L10n.string("Tutorial"), action: #selector(AppDelegate.showTutorial(_:)), keyEquivalent: "")
+
+        let gettingStartedItem = NSMenuItem(
+            title: L10n.string("Getting Started…"),
+            action: #selector(AppDelegate.showOnboarding(_:)),
+            keyEquivalent: ""
+        )
+        gettingStartedItem.target = NSApp.delegate
+        menu.addItem(gettingStartedItem)
+
+        let editorTourItem = NSMenuItem(
+            title: L10n.string("Editor Tour"),
+            action: #selector(AppDelegate.showTutorial(_:)),
+            keyEquivalent: ""
+        )
+        editorTourItem.target = NSApp.delegate
+        menu.addItem(editorTourItem)
+
         menu.addItem(.separator())
         menu.addItem(withTitle: L10n.string("Keyboard Shortcuts"), action: #selector(AppDelegate.showKeyboardShortcuts(_:)), keyEquivalent: "?")
         menu.addItem(withTitle: L10n.string("MCP Instructions"), action: #selector(AppDelegate.showMCPInstructions(_:)), keyEquivalent: "")
