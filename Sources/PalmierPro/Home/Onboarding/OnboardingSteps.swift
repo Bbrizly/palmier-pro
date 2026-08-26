@@ -120,7 +120,7 @@ struct OnboardingDirectionStep: View {
         VStack(alignment: .leading, spacing: AppTheme.Spacing.xl) {
             OnboardingHeading(
                 title: L10n.string("You stay the director."),
-                detail: L10n.string("AI can make the first decision. When the story is wrong, point at the exact clip, person, transcript passage, or moment and correct it without starting over.")
+                detail: L10n.string("AI can make the first decision. When the story is wrong, attach the exact timeline clip or time range — or reference the source media — and correct it without starting over.")
             )
 
             OnboardingEventStory()
@@ -131,11 +131,9 @@ struct OnboardingDirectionStep: View {
             )
 
             HStack(spacing: AppTheme.Spacing.smMd) {
-                OnboardingSelectionToken(symbol: "timeline.selection", label: L10n.string("Clip"))
-                OnboardingSelectionToken(symbol: "text.quote", label: L10n.string("Transcript"))
-                OnboardingSelectionToken(symbol: "person.crop.square", label: L10n.string("Person"))
-                OnboardingSelectionToken(symbol: "viewfinder", label: L10n.string("Viewer region"))
+                OnboardingSelectionToken(symbol: "timeline.selection", label: L10n.string("Timeline clip"))
                 OnboardingSelectionToken(symbol: "clock", label: L10n.string("Time range"))
+                OnboardingSelectionToken(symbol: "at", label: L10n.string("Media reference"))
             }
         }
     }
@@ -447,7 +445,7 @@ private struct OnboardingTimelineDemo: View {
 
 private struct OnboardingEventStory: View {
     private let events = [
-        ("Setup", "person.fill.questionmark", false),
+        ("Setup", "person.fill", false),
         ("Action", "figure.run", false),
         ("Payoff", "sparkles", true),
         ("Reaction", "face.smiling", true),
