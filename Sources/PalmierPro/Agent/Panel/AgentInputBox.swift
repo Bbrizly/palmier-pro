@@ -30,6 +30,7 @@ struct AgentInputBox<LeadingTools: View>: View {
         self.leadingTools = leadingTools()
     }
 
+    @AppStorage("hasSeenAgentPointingTip") private var hasSeenPointingTip = false
     @FocusState private var focused: Bool
     @State private var mentionQuery: String? = nil
     @State private var highlightedMentionIndex: Int = 0
@@ -37,6 +38,7 @@ struct AgentInputBox<LeadingTools: View>: View {
     @State private var mentionScrollTick: Int = 0
     @State private var isDropTargeted = false
     @State private var textEditorID = UUID()
+    @State private var showsPointingTip = false
     @Namespace private var sendStopNamespace
 
     private var showMentionPicker: Bool { mentionQuery != nil }
@@ -50,7 +52,11 @@ struct AgentInputBox<LeadingTools: View>: View {
     }
 
     var body: some View {
-        VStack(spacing: 0) {
+        VStack(spacing: AppTheme.Spacing.zero) {
+            if showsPointingTip {
+                pointingTip
+                    .transition(.opacity.combined(with: .move(edge: .bottom)))
+            }
             textField
                 .popover(isPresented: Binding(
                     get: { showMentionPicker },
@@ -79,9 +85,53 @@ struct AgentInputBox<LeadingTools: View>: View {
                 )
                 .allowsHitTesting(false)
         }
-        .animation(.easeOut(duration: 0.15), value: focused)
-        .animation(.easeOut(duration: 0.15), value: isDropTargeted)
+        .animation(.easeOut(duration: AppTheme.Anim.hover), value: focused)
+        .animation(.easeOut(duration: AppTheme.Anim.hover), value: isDropTargeted)
+        .animation(.easeInOut(duration: AppTheme.Anim.transition), value: showsPointingTip)
+        .onChange(of: focused) { _, isFocused in
+            guard isFocused, !hasSeenPointingTip else { return }
+            showsPointingTip = true
+        }
         .onDrop(of: [.fileURL], isTargeted: $isDropTargeted, perform: handleDrop)
+    }
+
+    private var pointingTip: some View {
+        HStack(alignment: .top, spacing: AppTheme.Spacing.smMd) {
+            Image(systemName: "scope")
+                .font(.system(size: AppTheme.FontSize.smMd, weight: AppTheme.FontWeight.semibold))
+                .foregroundStyle(AppTheme.Text.tertiaryColor)
+                .frame(width: AppTheme.IconSize.smMd)
+                .accessibilityHidden(true)
+
+            VStack(alignment: .leading, spacing: AppTheme.Spacing.xs) {
+                Text(L10n.string("You can point, not just explain."))
+                    .font(.system(size: AppTheme.FontSize.smMd, weight: AppTheme.FontWeight.semibold))
+                    .foregroundStyle(AppTheme.Text.primaryColor)
+                Text(L10n.string("Select a clip, transcript passage, person, viewer region, or time range first, then tell the co-editor what should change."))
+                    .font(.system(size: AppTheme.FontSize.sm))
+                    .foregroundStyle(AppTheme.Text.secondaryColor)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            Spacer(minLength: AppTheme.Spacing.sm)
+
+            Button {
+                hasSeenPointingTip = true
+                showsPointingTip = false
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.system(size: AppTheme.FontSize.xs, weight: AppTheme.FontWeight.semibold))
+                    .foregroundStyle(AppTheme.Text.tertiaryColor)
+                    .frame(width: AppTheme.IconSize.sm, height: AppTheme.IconSize.sm)
+            }
+            .buttonStyle(.plain)
+            .help(L10n.string("Dismiss"))
+            .accessibilityLabel(L10n.string("Dismiss co-editor tip"))
+        }
+        .padding(.horizontal, AppTheme.Spacing.mdLg)
+        .padding(.top, AppTheme.Spacing.md)
+        .padding(.bottom, AppTheme.Spacing.smMd)
+        .background(AppTheme.Interaction.fill(AppTheme.Opacity.faint))
     }
 
     private var textField: some View {
@@ -129,7 +179,7 @@ struct AgentInputBox<LeadingTools: View>: View {
     private var bottomBar: some View {
         HStack(spacing: AppTheme.Spacing.md) {
             leadingTools
-            Spacer(minLength: 0)
+            Spacer(minLength: AppTheme.Spacing.zero)
             GlassEffectContainer(spacing: AppTheme.Spacing.xs) {
                 sendStopButton
             }
@@ -143,7 +193,7 @@ struct AgentInputBox<LeadingTools: View>: View {
         if isSending {
             Button(action: onCancel) {
                 Image(systemName: "stop.fill")
-                    .font(.system(size: AppTheme.FontSize.xs, weight: .bold))
+                    .font(.system(size: AppTheme.FontSize.xs, weight: AppTheme.FontWeight.bold))
                     .frame(width: AppTheme.IconSize.sm, height: AppTheme.IconSize.sm)
             }
             .buttonStyle(.glass)
@@ -156,7 +206,7 @@ struct AgentInputBox<LeadingTools: View>: View {
         } else {
             Button(action: onSend) {
                 Image(systemName: "arrow.up")
-                    .font(.system(size: AppTheme.FontSize.sm, weight: .bold))
+                    .font(.system(size: AppTheme.FontSize.sm, weight: AppTheme.FontWeight.bold))
                     .frame(width: AppTheme.IconSize.sm, height: AppTheme.IconSize.sm)
             }
             .buttonStyle(.glassProminent)
@@ -165,7 +215,7 @@ struct AgentInputBox<LeadingTools: View>: View {
             .tint(AppTheme.Accent.primary)
             .glassEffectID("sendStop", in: sendStopNamespace)
             .disabled(!canSend)
-            .opacity(canSend ? 1 : AppTheme.Opacity.strong)
+            .opacity(canSend ? AppTheme.Opacity.opaque : AppTheme.Opacity.strong)
             .transition(.scale.combined(with: .opacity))
         }
     }
