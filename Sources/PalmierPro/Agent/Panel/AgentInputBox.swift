@@ -107,7 +107,7 @@ struct AgentInputBox<LeadingTools: View>: View {
                 Text(L10n.string("You can point, not just explain."))
                     .font(.system(size: AppTheme.FontSize.smMd, weight: AppTheme.FontWeight.semibold))
                     .foregroundStyle(AppTheme.Text.primaryColor)
-                Text(L10n.string("Select a clip, transcript passage, person, viewer region, or time range first, then tell the co-editor what should change."))
+                Text(L10n.string("Select a timeline clip or time range, or @reference the media you mean, then tell the co-editor exactly what should change."))
                     .font(.system(size: AppTheme.FontSize.sm))
                     .foregroundStyle(AppTheme.Text.secondaryColor)
                     .fixedSize(horizontal: false, vertical: true)
