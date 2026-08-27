@@ -11,53 +11,53 @@ struct OnboardingStoreTests {
 
             #expect(!store.isComplete)
             #expect(store.step == .welcome)
+            #expect(!store.canGoBack)
+            #expect(!store.isLastStep)
+            #expect(store.progress == 1.0 / Double(OnboardingStep.count))
         }
     }
 
-    @Test func existingWelcomeCompletionSkipsOnboarding() throws {
+    @Test func completedUserSkipsAutomaticOnboarding() throws {
         try withDefaults { defaults in
             defaults.set(true, forKey: OnboardingStore.completionKey)
 
             let store = OnboardingStore(defaults: defaults)
 
             #expect(store.isComplete)
+            #expect(store.step == .welcome)
         }
     }
 
-    @Test func discoveryAdvancesToProfile() throws {
+    @Test func advancesThroughEveryStepAndClampsAtEnd() throws {
         try withDefaults { defaults in
             let store = OnboardingStore(defaults: defaults)
-            store.advance()
-            store.advance()
 
-            #expect(store.step == .profile)
+            for expectedStep in OnboardingStep.allCases.dropFirst() {
+                store.advance()
+                #expect(store.step == expectedStep)
+            }
+
+            #expect(store.isLastStep)
+            #expect(store.progress == 1)
+
+            store.advance()
+            #expect(store.step == .workflows)
         }
     }
 
-    @Test func submittingSurveyAdvancesToAccount() throws {
+    @Test func backNavigationClampsAtWelcome() throws {
         try withDefaults { defaults in
             let store = OnboardingStore(defaults: defaults)
-            store.advance()
-            store.advance()
-            store.submitSurvey()
 
-            #expect(store.step == .account)
-        }
-    }
-
-    @Test func stepsClampAtBothEnds() throws {
-        try withDefaults { defaults in
-            let store = OnboardingStore(defaults: defaults)
             store.goBack()
-
             #expect(store.step == .welcome)
 
             store.advance()
-            store.advance()
-            store.advance()
-            store.advance()
+            #expect(store.canGoBack)
 
-            #expect(store.step == .account)
+            store.goBack()
+            #expect(store.step == .welcome)
+            #expect(!store.canGoBack)
         }
     }
 
@@ -74,42 +74,31 @@ struct OnboardingStoreTests {
         }
     }
 
-    @Test func selectingAnOptionAgainDeselectsIt() throws {
+    @Test func skipPersistsCompletion() throws {
         try withDefaults { defaults in
             let store = OnboardingStore(defaults: defaults)
-            store.toggle(.other, for: .videoTypes)
-            store.toggle(.other, for: .videoTypes)
+            store.advance()
 
-            #expect(store.selection(for: .videoTypes).isEmpty)
+            store.skip()
+
+            #expect(store.isComplete)
+            #expect(defaults.bool(forKey: OnboardingStore.completionKey))
         }
     }
 
-    @Test func acquisitionSourceIsSingleSelect() throws {
+    @Test func replayIsSessionOnlyAndResetsToWelcome() throws {
         try withDefaults { defaults in
+            defaults.set(true, forKey: OnboardingStore.completionKey)
             let store = OnboardingStore(defaults: defaults)
-            let google = try #require(OnboardingQuestion.acquisitionSource.options.first { $0.id == "google" })
-            let github = try #require(OnboardingQuestion.acquisitionSource.options.first { $0.id == "github" })
+            store.advance()
+            store.advance()
 
-            store.toggle(google, for: .acquisitionSource)
-            store.toggle(github, for: .acquisitionSource)
+            store.replay()
 
-            #expect(store.selection(for: .acquisitionSource) == ["github"])
-        }
-    }
-
-    @Test func noPreviousEditorIsExclusive() throws {
-        try withDefaults { defaults in
-            let store = OnboardingStore(defaults: defaults)
-            let premiere = try #require(OnboardingQuestion.previousEditors.options.first { $0.id == "premiere_pro" })
-            let none = try #require(OnboardingQuestion.previousEditors.options.first { $0.id == "none" })
-            let capcut = try #require(OnboardingQuestion.previousEditors.options.first { $0.id == "capcut" })
-
-            store.toggle(premiere, for: .previousEditors)
-            store.toggle(none, for: .previousEditors)
-            #expect(store.selection(for: .previousEditors) == ["none"])
-
-            store.toggle(capcut, for: .previousEditors)
-            #expect(store.selection(for: .previousEditors) == ["capcut"])
+            #expect(!store.isComplete)
+            #expect(store.step == .welcome)
+            #expect(defaults.bool(forKey: OnboardingStore.completionKey))
+            #expect(OnboardingStore(defaults: defaults).isComplete)
         }
     }
 
