@@ -21,6 +21,8 @@ struct HomeView: View {
         )
         .background(.ultraThinMaterial)
         .focusEffectDisabled()
+        .disabled(isModalOverlayPresented)
+        .accessibilityHidden(isModalOverlayPresented)
         .task { await VisualModelLoader.shared.prepare() }
         .onAppear { changelog.checkForWhatsNew() }
         .overlay {
