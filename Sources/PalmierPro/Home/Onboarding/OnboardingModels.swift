@@ -33,8 +33,8 @@ enum OnboardingMode: String, CaseIterable, Identifiable {
 
     var detail: String {
         switch self {
-        case .autopilot: "Drop footage in. Get an editable first draft."
-        case .copilot: "Select anything and tell AI what you want changed."
+        case .autopilot: "Ask for an editable first draft from your footage."
+        case .copilot: "Select a clip or range and tell AI what you want changed."
         case .manual: "Edit normally. AI stays out of your way."
         }
     }
@@ -43,7 +43,7 @@ enum OnboardingMode: String, CaseIterable, Identifiable {
         switch self {
         case .autopilot: "sparkles.rectangle.stack"
         case .copilot: "cursorarrow.motionlines"
-        case .manual: "timeline.selection"
+        case .manual: "slider.horizontal.3"
         }
     }
 }
@@ -69,7 +69,7 @@ enum OnboardingWorkflow: String, CaseIterable, Identifiable {
 
     var detail: String {
         switch self {
-        case .shorts: "Find complete moments and shape editable vertical cuts."
+        case .shorts: "Shape selected moments into editable vertical cuts."
         case .talkingHead: "Tighten pacing, captions, B-roll, and emphasis."
         case .gaming: "Preserve the setup, payoff, and reaction."
         case .appDemo: "Tighten narration and emphasize important interactions."
@@ -84,22 +84,6 @@ enum OnboardingWorkflow: String, CaseIterable, Identifiable {
         case .gaming: "gamecontroller"
         case .appDemo: "macwindow"
         case .empty: "plus.rectangle"
-        }
-    }
-}
-
-enum OnboardingPreferenceScope: String, CaseIterable, Identifiable {
-    case project
-    case workflow
-    case global
-
-    var id: String { rawValue }
-
-    var title: String {
-        switch self {
-        case .project: "Just this edit"
-        case .workflow: "This workflow"
-        case .global: "Everything I make"
         }
     }
 }
