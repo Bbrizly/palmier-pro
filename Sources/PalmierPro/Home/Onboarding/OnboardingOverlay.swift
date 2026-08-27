@@ -4,6 +4,8 @@ struct OnboardingOverlay: View {
     @Bindable var onboarding: OnboardingStore
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
+    private static let scrollTopID = "onboarding-scroll-top"
+
     var body: some View {
         ZStack {
             AppTheme.MediaOverlay.backgroundColor.opacity(AppTheme.Opacity.strong)
@@ -79,41 +81,50 @@ struct OnboardingOverlay: View {
     }
 
     private var content: some View {
-        ScrollView {
-            Group {
-                switch onboarding.step {
-                case .welcome:
-                    OnboardingWelcomeStep()
-                case .understanding:
-                    OnboardingUnderstandingStep()
-                case .sharedTimeline:
-                    OnboardingSharedTimelineStep()
-                case .direction:
-                    OnboardingDirectionStep()
-                case .personalization:
-                    OnboardingPersonalizationStep()
-                case .compute:
-                    OnboardingComputeStep(onOpenSetup: onboarding.openComputeSetup)
-                case .workflows:
-                    OnboardingWorkflowsStep()
+        ScrollViewReader { proxy in
+            ScrollView {
+                Color.clear
+                    .frame(height: 1)
+                    .id(Self.scrollTopID)
+
+                Group {
+                    switch onboarding.step {
+                    case .welcome:
+                        OnboardingWelcomeStep()
+                    case .understanding:
+                        OnboardingUnderstandingStep()
+                    case .sharedTimeline:
+                        OnboardingSharedTimelineStep()
+                    case .direction:
+                        OnboardingDirectionStep()
+                    case .personalization:
+                        OnboardingPersonalizationStep()
+                    case .compute:
+                        OnboardingComputeStep(onOpenSetup: onboarding.openComputeSetup)
+                    case .workflows:
+                        OnboardingWorkflowsStep()
+                    }
                 }
+                .id(onboarding.step)
+                .frame(maxWidth: AppTheme.Onboarding.contentMaxWidth, alignment: .topLeading)
+                .padding(.horizontal, AppTheme.Spacing.xxl)
+                .padding(.vertical, AppTheme.Spacing.xl)
+                .frame(maxWidth: .infinity, alignment: .top)
+                .transition(
+                    reduceMotion
+                        ? .opacity
+                        : .asymmetric(
+                            insertion: .move(edge: .trailing).combined(with: .opacity),
+                            removal: .move(edge: .leading).combined(with: .opacity)
+                        )
+                )
             }
-            .id(onboarding.step)
-            .frame(maxWidth: AppTheme.Onboarding.contentMaxWidth, alignment: .topLeading)
-            .padding(.horizontal, AppTheme.Spacing.xxl)
-            .padding(.vertical, AppTheme.Spacing.xl)
-            .frame(maxWidth: .infinity, alignment: .top)
-            .transition(
-                reduceMotion
-                    ? .opacity
-                    : .asymmetric(
-                        insertion: .move(edge: .trailing).combined(with: .opacity),
-                        removal: .move(edge: .leading).combined(with: .opacity)
-                    )
-            )
+            .scrollIndicators(.automatic)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .onChange(of: onboarding.step) { _, _ in
+                proxy.scrollTo(Self.scrollTopID, anchor: .top)
+            }
         }
-        .scrollIndicators(.automatic)
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     private var footer: some View {
