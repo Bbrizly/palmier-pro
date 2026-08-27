@@ -5,7 +5,7 @@ struct OnboardingWelcomeStep: View {
         VStack(alignment: .leading, spacing: AppTheme.Spacing.xl) {
             OnboardingHeading(
                 title: L10n.string("Your video editor, with an AI co-editor."),
-                detail: L10n.string("Edit normally, let AI build a first cut, or work together. Everything the AI does stays on the timeline where you can change it.")
+                detail: L10n.string("Edit normally, ask AI for a first pass, or work together. The co-editor changes the same project and timeline you can edit yourself.")
             )
 
             HStack(alignment: .top, spacing: AppTheme.Spacing.mdLg) {
@@ -17,7 +17,7 @@ struct OnboardingWelcomeStep: View {
 
             OnboardingCallout(
                 symbol: "arrow.triangle.branch",
-                text: L10n.string("Move between Autopilot, Copilot, and Manual editing whenever you want. There is no separate AI project.")
+                text: L10n.string("Move between Autopilot, Copilot, and Manual editing whenever you want. There is no separate AI project to keep in sync.")
             )
         }
     }
@@ -31,8 +31,8 @@ struct OnboardingUnderstandingStep: View {
     var body: some View {
         VStack(alignment: .leading, spacing: AppTheme.Spacing.lgXl) {
             OnboardingHeading(
-                title: L10n.string("It understands your footage."),
-                detail: L10n.string("Analyze source media once, then reuse that understanding while you edit instead of making the AI re-watch everything after every change.")
+                title: L10n.string("Give the co-editor useful context."),
+                detail: L10n.string("Palmier can inspect your source media instead of treating editing like a blind text command. Transcripts, source previews, visual search, and audio tools help it work from the footage you actually imported.")
             )
 
             LazyVGrid(columns: columns, spacing: AppTheme.Spacing.mdLg) {
@@ -42,24 +42,24 @@ struct OnboardingUnderstandingStep: View {
                     detail: L10n.string("Transcript and precise spoken timing")
                 )
                 OnboardingCapabilityCard(
-                    symbol: "person.crop.rectangle.stack",
-                    title: L10n.string("People"),
-                    detail: L10n.string("Subjects, speakers, and tracking")
+                    symbol: "photo.on.rectangle",
+                    title: L10n.string("Visual search"),
+                    detail: L10n.string("Find source shots by what is visible")
                 )
                 OnboardingCapabilityCard(
-                    symbol: "rectangle.stack",
-                    title: L10n.string("Scenes"),
-                    detail: L10n.string("Shots, actions, and visual context")
+                    symbol: "film.stack",
+                    title: L10n.string("Source inspection"),
+                    detail: L10n.string("Preview frames and understand media before cutting")
                 )
                 OnboardingCapabilityCard(
-                    symbol: "waveform.badge.magnifyingglass",
+                    symbol: "metronome",
                     title: L10n.string("Audio"),
-                    detail: L10n.string("Energy, reactions, and useful events")
+                    detail: L10n.string("Beat detection and cleanup tools")
                 )
             }
 
             DisclosureGroup(isExpanded: $showsTechnicalDetails) {
-                Text(L10n.string("GRACE keeps the editor focused on capabilities instead of model names. Transcription, visual understanding, tracking, and generation can use the Mere runtime you configure, while the analysis can be cached and reused by later edits."))
+                Text(L10n.string("The Agent can read transcripts, inspect source media, search visuals, and inspect the composited timeline it is editing. GRACE / Film Studio is where additional local runtime and generation capabilities are configured, keeping model plumbing out of the normal editing UI."))
                     .font(.system(size: AppTheme.FontSize.smMd))
                     .foregroundStyle(AppTheme.Text.secondaryColor)
                     .padding(.top, AppTheme.Spacing.smMd)
@@ -68,7 +68,7 @@ struct OnboardingUnderstandingStep: View {
                     .font(.system(size: AppTheme.FontSize.smMd, weight: AppTheme.FontWeight.medium))
                     .foregroundStyle(AppTheme.Text.primaryColor)
             }
-            .accessibilityHint(L10n.string("Shows technical details about GRACE and local analysis."))
+            .accessibilityHint(L10n.string("Shows technical details about media context and GRACE."))
         }
     }
 }
@@ -81,18 +81,18 @@ struct OnboardingSharedTimelineStep: View {
         VStack(alignment: .leading, spacing: AppTheme.Spacing.lgXl) {
             OnboardingHeading(
                 title: L10n.string("AI edits the same timeline you do."),
-                detail: L10n.string("Cuts, captions, tracking, B-roll, and effects become ordinary editable project state. Move something yourself and the AI continues from your new timeline.")
+                detail: L10n.string("Cuts, captions, B-roll, transforms, color, and effects become ordinary editable project state. Change something yourself and the co-editor continues from the timeline you now have.")
             )
 
             OnboardingTimelineDemo(phase: phase)
                 .frame(height: AppTheme.Onboarding.visualHeight)
                 .accessibilityElement(children: .ignore)
-                .accessibilityLabel(L10n.string("Timeline demonstration showing AI edits and a manual adjustment on the same project."))
+                .accessibilityLabel(L10n.string("Timeline demonstration showing an AI edit, a manual adjustment, and the co-editor continuing from the changed project."))
 
             HStack(spacing: AppTheme.Spacing.smMd) {
                 OnboardingPromptChip(text: L10n.string("Keep this through the reaction"))
-                OnboardingPromptChip(text: L10n.string("Track her instead"))
-                OnboardingPromptChip(text: L10n.string("Put text behind me"))
+                OnboardingPromptChip(text: L10n.string("Make the active word yellow"))
+                OnboardingPromptChip(text: L10n.string("Use this shot as B-roll"))
             }
         }
         .task {
@@ -100,12 +100,14 @@ struct OnboardingSharedTimelineStep: View {
                 phase = 2
                 return
             }
+
             phase = 0
             try? await Task.sleep(for: .seconds(AppTheme.Anim.pulse))
             guard !Task.isCancelled else { return }
             withAnimation(.easeInOut(duration: AppTheme.Anim.transition)) {
                 phase = 1
             }
+
             try? await Task.sleep(for: .seconds(AppTheme.Anim.pulse))
             guard !Task.isCancelled else { return }
             withAnimation(.easeInOut(duration: AppTheme.Anim.transition)) {
@@ -120,7 +122,7 @@ struct OnboardingDirectionStep: View {
         VStack(alignment: .leading, spacing: AppTheme.Spacing.xl) {
             OnboardingHeading(
                 title: L10n.string("You stay the director."),
-                detail: L10n.string("AI can make the first decision. When the story is wrong, attach the exact timeline clip or time range — or reference the source media — and correct it without starting over.")
+                detail: L10n.string("When the first cut is wrong, point the co-editor at the exact timeline clip or time range — or @reference the source media — and correct that part without starting over.")
             )
 
             OnboardingEventStory()
@@ -131,7 +133,7 @@ struct OnboardingDirectionStep: View {
             )
 
             HStack(spacing: AppTheme.Spacing.smMd) {
-                OnboardingSelectionToken(symbol: "timeline.selection", label: L10n.string("Timeline clip"))
+                OnboardingSelectionToken(symbol: "film", label: L10n.string("Timeline clip"))
                 OnboardingSelectionToken(symbol: "clock", label: L10n.string("Time range"))
                 OnboardingSelectionToken(symbol: "at", label: L10n.string("Media reference"))
             }
@@ -143,54 +145,32 @@ struct OnboardingPersonalizationStep: View {
     var body: some View {
         VStack(alignment: .leading, spacing: AppTheme.Spacing.lgXl) {
             OnboardingHeading(
-                title: L10n.string("It can become your editor."),
-                detail: L10n.string("You do not need to know your style on day one. Save the choices that keep working, and keep one-off corrections local to the edit that needed them.")
+                title: L10n.string("Save what keeps working."),
+                detail: L10n.string("You do not need to know your editing style on day one. Keep one-off directions in the current project, and save repeatable methods as Skills when they are worth using again.")
             )
 
             HStack(alignment: .top, spacing: AppTheme.Spacing.mdLg) {
                 OnboardingStyleCard(
                     title: L10n.string("My Captions"),
                     symbol: "captions.bubble",
-                    details: L10n.string("White · active word yellow · subtle bounce")
+                    details: L10n.string("White · active word yellow · subtle emphasis")
                 )
                 OnboardingStyleCard(
                     title: L10n.string("Gaming Short"),
                     symbol: "gamecontroller",
-                    details: L10n.string("Fast setup · never cut payoff · preserve reaction")
+                    details: L10n.string("Fast setup · preserve payoff · keep reaction")
                 )
                 OnboardingStyleCard(
                     title: L10n.string("App Demo"),
                     symbol: "macwindow",
-                    details: L10n.string("Clean pacing · UI callouts · minimal B-roll")
+                    details: L10n.string("Clean pacing · clear UI emphasis · minimal B-roll")
                 )
             }
 
-            VStack(alignment: .leading, spacing: AppTheme.Spacing.smMd) {
-                Text(L10n.string("When you correct something, choose how far that preference should reach:"))
-                    .font(.system(size: AppTheme.FontSize.smMd))
-                    .foregroundStyle(AppTheme.Text.secondaryColor)
-
-                HStack(spacing: AppTheme.Spacing.smMd) {
-                    ForEach(OnboardingPreferenceScope.allCases) { scope in
-                        Text(L10n.string(scope.title))
-                            .font(.system(size: AppTheme.FontSize.sm, weight: AppTheme.FontWeight.medium))
-                            .foregroundStyle(AppTheme.Text.primaryColor)
-                            .padding(.horizontal, AppTheme.Spacing.mdLg)
-                            .frame(height: AppTheme.Onboarding.scopeChipHeight)
-                            .background(
-                                AppTheme.Interaction.fill(AppTheme.Opacity.faint),
-                                in: Capsule()
-                            )
-                            .overlay {
-                                Capsule()
-                                    .strokeBorder(
-                                        AppTheme.Border.subtleColor,
-                                        lineWidth: AppTheme.BorderWidth.hairline
-                                    )
-                            }
-                    }
-                }
-            }
+            OnboardingCallout(
+                symbol: "checklist",
+                text: L10n.string("A correction is not silently treated as a permanent rule. Save reusable guidance deliberately when you want the co-editor to use it again.")
+            )
         }
     }
 }
@@ -201,8 +181,8 @@ struct OnboardingComputeStep: View {
     var body: some View {
         VStack(alignment: .leading, spacing: AppTheme.Spacing.xl) {
             OnboardingHeading(
-                title: L10n.string("Your editor does not need to become a furnace."),
-                detail: L10n.string("Palmier stays focused on the timeline and preview. GRACE owns the production runtime so heavier analysis and generation do not have to become editor UI concerns.")
+                title: L10n.string("Keep model plumbing out of the editor."),
+                detail: L10n.string("Palmier stays focused on the project, timeline, and preview. GRACE / Film Studio owns runtime setup so local generation and heavier capability configuration have one place to live.")
             )
 
             OnboardingComputeDiagram()
@@ -211,7 +191,7 @@ struct OnboardingComputeStep: View {
             HStack(alignment: .center, spacing: AppTheme.Spacing.mdLg) {
                 OnboardingCallout(
                     symbol: "externaldrive",
-                    text: L10n.string("Keep model and media storage where it makes sense for your setup instead of treating the internal SSD as the only place work can live.")
+                    text: L10n.string("Runtime and storage choices belong in GRACE rather than being scattered through editing controls.")
                 )
 
                 Button(L10n.string("Open GRACE setup"), action: onOpenSetup)
@@ -232,8 +212,8 @@ struct OnboardingWorkflowsStep: View {
     var body: some View {
         VStack(alignment: .leading, spacing: AppTheme.Spacing.lgXl) {
             OnboardingHeading(
-                title: L10n.string("What do you want to make?"),
-                detail: L10n.string("These are editing intents, not locked modes. Start a normal project, then let the co-editor take as much or as little of the first pass as you want.")
+                title: L10n.string("Start however you want."),
+                detail: L10n.string("Create a normal project, then ask the co-editor for the kind of first pass you need. These are starting ideas, not buttons that lock the project into a mode.")
             )
 
             LazyVGrid(columns: columns, spacing: AppTheme.Spacing.mdLg) {
@@ -261,6 +241,7 @@ private struct OnboardingHeading: View {
                 .tracking(AppTheme.Tracking.tight)
                 .foregroundStyle(AppTheme.Text.primaryColor)
                 .fixedSize(horizontal: false, vertical: true)
+
             Text(detail)
                 .font(.system(size: AppTheme.FontSize.mdLg))
                 .foregroundStyle(AppTheme.Text.secondaryColor)
@@ -278,15 +259,21 @@ private struct OnboardingModeCard: View {
                 .font(.system(size: AppTheme.IconSize.lg, weight: AppTheme.FontWeight.medium))
                 .foregroundStyle(AppTheme.Text.primaryColor)
                 .accessibilityHidden(true)
+
             Text(L10n.string(mode.title))
                 .font(.system(size: AppTheme.FontSize.lg, weight: AppTheme.FontWeight.semibold))
                 .foregroundStyle(AppTheme.Text.primaryColor)
+
             Text(L10n.string(mode.detail))
                 .font(.system(size: AppTheme.FontSize.smMd))
                 .foregroundStyle(AppTheme.Text.secondaryColor)
                 .fixedSize(horizontal: false, vertical: true)
         }
-        .frame(maxWidth: .infinity, minHeight: AppTheme.Onboarding.modeCardMinHeight, alignment: .topLeading)
+        .frame(
+            maxWidth: .infinity,
+            minHeight: AppTheme.Onboarding.modeCardMinHeight,
+            alignment: .topLeading
+        )
         .padding(AppTheme.Spacing.lgXl)
         .background(
             AppTheme.Background.raisedColor,
@@ -311,16 +298,23 @@ private struct OnboardingCapabilityCard: View {
                 .frame(width: AppTheme.IconSize.lgXl)
                 .foregroundStyle(AppTheme.Text.primaryColor)
                 .accessibilityHidden(true)
+
             VStack(alignment: .leading, spacing: AppTheme.Spacing.xs) {
                 Text(title)
                     .font(.system(size: AppTheme.FontSize.mdLg, weight: AppTheme.FontWeight.semibold))
                     .foregroundStyle(AppTheme.Text.primaryColor)
+
                 Text(detail)
                     .font(.system(size: AppTheme.FontSize.smMd))
                     .foregroundStyle(AppTheme.Text.secondaryColor)
+                    .fixedSize(horizontal: false, vertical: true)
             }
         }
-        .frame(maxWidth: .infinity, minHeight: AppTheme.Onboarding.featureCardMinHeight, alignment: .topLeading)
+        .frame(
+            maxWidth: .infinity,
+            minHeight: AppTheme.Onboarding.featureCardMinHeight,
+            alignment: .topLeading
+        )
         .padding(AppTheme.Spacing.lg)
         .background(
             AppTheme.Background.raisedColor,
@@ -342,6 +336,7 @@ private struct OnboardingTimelineDemo: View {
                 Label(L10n.string("Same project"), systemImage: "film.stack")
                     .font(.system(size: AppTheme.FontSize.sm, weight: AppTheme.FontWeight.medium))
                     .foregroundStyle(AppTheme.Text.tertiaryColor)
+
                 Spacer()
                 statusLabel
             }
@@ -457,10 +452,14 @@ private struct OnboardingEventStory: View {
                 VStack(spacing: AppTheme.Spacing.smMd) {
                     Image(systemName: event.1)
                         .font(.system(size: AppTheme.IconSize.mdLg, weight: AppTheme.FontWeight.medium))
-                        .foregroundStyle(event.2 ? AppTheme.Status.successColor : AppTheme.Text.secondaryColor)
+                        .foregroundStyle(
+                            event.2 ? AppTheme.Status.successColor : AppTheme.Text.secondaryColor
+                        )
+
                     Text(L10n.string(event.0))
                         .font(.system(size: AppTheme.FontSize.smMd, weight: AppTheme.FontWeight.semibold))
                         .foregroundStyle(AppTheme.Text.primaryColor)
+
                     if event.2 {
                         Label(L10n.string("Keep"), systemImage: "checkmark.circle.fill")
                             .font(.system(size: AppTheme.FontSize.sm))
@@ -498,7 +497,9 @@ private struct OnboardingEventStory: View {
             }
         }
         .accessibilityElement(children: .combine)
-        .accessibilityLabel(L10n.string("Story structure: setup, action, payoff, reaction. Payoff and reaction are marked to keep."))
+        .accessibilityLabel(
+            L10n.string("Story structure: setup, action, payoff, reaction. Payoff and reaction are marked to keep.")
+        )
     }
 }
 
@@ -526,12 +527,17 @@ private struct OnboardingStyleCard: View {
             Label(title, systemImage: symbol)
                 .font(.system(size: AppTheme.FontSize.mdLg, weight: AppTheme.FontWeight.semibold))
                 .foregroundStyle(AppTheme.Text.primaryColor)
+
             Text(details)
                 .font(.system(size: AppTheme.FontSize.sm))
                 .foregroundStyle(AppTheme.Text.secondaryColor)
                 .fixedSize(horizontal: false, vertical: true)
         }
-        .frame(maxWidth: .infinity, minHeight: AppTheme.Onboarding.featureCardMinHeight, alignment: .topLeading)
+        .frame(
+            maxWidth: .infinity,
+            minHeight: AppTheme.Onboarding.featureCardMinHeight,
+            alignment: .topLeading
+        )
         .padding(AppTheme.Spacing.lg)
         .background(
             AppTheme.Background.raisedColor,
@@ -548,9 +554,9 @@ private struct OnboardingComputeDiagram: View {
     var body: some View {
         HStack(spacing: AppTheme.Spacing.lgXl) {
             OnboardingComputeNode(
-                symbol: "timeline.selection",
+                symbol: "film",
                 title: L10n.string("Palmier"),
-                detail: L10n.string("Timeline · preview · manual edits")
+                detail: L10n.string("Project · timeline · preview")
             )
 
             OnboardingDiagramArrow()
@@ -558,23 +564,16 @@ private struct OnboardingComputeDiagram: View {
             OnboardingComputeNode(
                 symbol: "sparkles",
                 title: L10n.string("GRACE"),
-                detail: L10n.string("Plans and routes production work")
+                detail: L10n.string("Runtime and capability setup")
             )
 
             OnboardingDiagramArrow()
 
-            VStack(spacing: AppTheme.Spacing.smMd) {
-                OnboardingComputeNode(
-                    symbol: "laptopcomputer",
-                    title: L10n.string("This Mac"),
-                    detail: L10n.string("Lightweight or available work")
-                )
-                OnboardingComputeNode(
-                    symbol: "network",
-                    title: L10n.string("Other compute"),
-                    detail: L10n.string("Heavy jobs when configured")
-                )
-            }
+            OnboardingComputeNode(
+                symbol: "cpu",
+                title: L10n.string("Configured runtime"),
+                detail: L10n.string("Local generation and production tools")
+            )
         }
         .padding(AppTheme.Spacing.lgXl)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -587,7 +586,9 @@ private struct OnboardingComputeDiagram: View {
                 .strokeBorder(AppTheme.Border.subtleColor, lineWidth: AppTheme.BorderWidth.hairline)
         }
         .accessibilityElement(children: .combine)
-        .accessibilityLabel(L10n.string("Palmier sends production work through GRACE to this Mac or other configured compute."))
+        .accessibilityLabel(
+            L10n.string("Palmier keeps editing controls separate from the GRACE runtime configuration used for production capabilities.")
+        )
     }
 }
 
@@ -601,9 +602,12 @@ private struct OnboardingComputeNode: View {
             Image(systemName: symbol)
                 .font(.system(size: AppTheme.IconSize.lg, weight: AppTheme.FontWeight.medium))
                 .foregroundStyle(AppTheme.Text.primaryColor)
+                .accessibilityHidden(true)
+
             Text(title)
                 .font(.system(size: AppTheme.FontSize.mdLg, weight: AppTheme.FontWeight.semibold))
                 .foregroundStyle(AppTheme.Text.primaryColor)
+
             Text(detail)
                 .font(.system(size: AppTheme.FontSize.sm))
                 .foregroundStyle(AppTheme.Text.tertiaryColor)
@@ -639,17 +643,23 @@ private struct OnboardingWorkflowCard: View {
                 .frame(width: AppTheme.IconSize.lgXl)
                 .foregroundStyle(AppTheme.Text.primaryColor)
                 .accessibilityHidden(true)
+
             VStack(alignment: .leading, spacing: AppTheme.Spacing.xs) {
                 Text(L10n.string(workflow.title))
                     .font(.system(size: AppTheme.FontSize.mdLg, weight: AppTheme.FontWeight.semibold))
                     .foregroundStyle(AppTheme.Text.primaryColor)
+
                 Text(L10n.string(workflow.detail))
                     .font(.system(size: AppTheme.FontSize.sm))
                     .foregroundStyle(AppTheme.Text.secondaryColor)
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
-        .frame(maxWidth: .infinity, minHeight: AppTheme.Onboarding.workflowCardMinHeight, alignment: .topLeading)
+        .frame(
+            maxWidth: .infinity,
+            minHeight: AppTheme.Onboarding.workflowCardMinHeight,
+            alignment: .topLeading
+        )
         .padding(AppTheme.Spacing.lg)
         .background(
             AppTheme.Background.raisedColor,
@@ -672,6 +682,7 @@ private struct OnboardingCallout: View {
                 .frame(width: AppTheme.IconSize.smMd)
                 .foregroundStyle(AppTheme.Text.tertiaryColor)
                 .accessibilityHidden(true)
+
             Text(text)
                 .font(.system(size: AppTheme.FontSize.smMd))
                 .foregroundStyle(AppTheme.Text.secondaryColor)
