@@ -4,6 +4,7 @@ import UniformTypeIdentifiers
 
 struct AgentInputBox<LeadingTools: View>: View {
     @Environment(EditorViewModel.self) var editor
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Binding var draft: String
     @Binding var mentions: [AgentMention]
     let isSending: Bool
@@ -55,7 +56,11 @@ struct AgentInputBox<LeadingTools: View>: View {
         VStack(spacing: AppTheme.Spacing.zero) {
             if showsPointingTip {
                 pointingTip
-                    .transition(.opacity.combined(with: .move(edge: .bottom)))
+                    .transition(
+                        reduceMotion
+                            ? .opacity
+                            : .opacity.combined(with: .move(edge: .bottom))
+                    )
             }
             textField
                 .popover(isPresented: Binding(
@@ -87,9 +92,13 @@ struct AgentInputBox<LeadingTools: View>: View {
         }
         .animation(.easeOut(duration: AppTheme.Anim.hover), value: focused)
         .animation(.easeOut(duration: AppTheme.Anim.hover), value: isDropTargeted)
-        .animation(.easeInOut(duration: AppTheme.Anim.transition), value: showsPointingTip)
+        .animation(
+            reduceMotion ? nil : .easeInOut(duration: AppTheme.Anim.transition),
+            value: showsPointingTip
+        )
         .onChange(of: focused) { _, isFocused in
             guard isFocused, !hasSeenPointingTip else { return }
+            hasSeenPointingTip = true
             showsPointingTip = true
         }
         .onDrop(of: [.fileURL], isTargeted: $isDropTargeted, perform: handleDrop)
@@ -116,7 +125,6 @@ struct AgentInputBox<LeadingTools: View>: View {
             Spacer(minLength: AppTheme.Spacing.sm)
 
             Button {
-                hasSeenPointingTip = true
                 showsPointingTip = false
             } label: {
                 Image(systemName: "xmark")
