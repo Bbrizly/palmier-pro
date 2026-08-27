@@ -11,12 +11,20 @@ struct OnboardingOverlay: View {
             AppTheme.MediaOverlay.backgroundColor.opacity(AppTheme.Opacity.strong)
                 .ignoresSafeArea()
 
-            card
-                .frame(
-                    width: AppTheme.Onboarding.cardWidth,
-                    height: AppTheme.Onboarding.cardHeight
-                )
-                .padding(AppTheme.Spacing.xl)
+            GeometryReader { proxy in
+                card
+                    .frame(
+                        width: min(
+                            AppTheme.Onboarding.cardWidth,
+                            max(0, proxy.size.width - AppTheme.Spacing.xl * 2)
+                        ),
+                        height: min(
+                            AppTheme.Onboarding.cardHeight,
+                            max(0, proxy.size.height - AppTheme.Spacing.xl * 2)
+                        )
+                    )
+                    .position(x: proxy.size.width / 2, y: proxy.size.height / 2)
+            }
         }
         .transition(.opacity)
         .animation(
