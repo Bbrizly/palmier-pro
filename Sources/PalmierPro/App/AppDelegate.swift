@@ -66,6 +66,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                         processID: ProcessInfo.processInfo.processIdentifier
                     )
                 }
+                await FilmStudioService.stopManagedAgentServer()
                 await SkillStore.shared.prepareForTermination()
                 if !MLXRuntime.beginTermination() {
                     await MLXRuntime.waitUntilIdle()
@@ -144,6 +145,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @MainActor
     @objc func showSettings(_ sender: Any?) {
         SettingsWindowController.shared.show()
+    }
+
+    @MainActor
+    @objc func showFilmStudio(_ sender: Any?) {
+        FilmStudioWindowController.shared.show()
+    }
+
+    @MainActor
+    @objc func showOnboarding(_ sender: Any?) {
+        AppState.shared.showHome()
+        OnboardingStore.shared.replay()
+        HomeWindowController.shared.window?.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
     }
 
     @MainActor

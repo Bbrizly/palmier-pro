@@ -53,6 +53,29 @@ struct GeneralPane: View {
                 }
             }
 
+            SettingsSection(title: L10n.string("Getting Started")) {
+                HStack(alignment: .center, spacing: AppTheme.Spacing.lg) {
+                    VStack(alignment: .leading, spacing: AppTheme.Spacing.xs) {
+                        Text(L10n.string("AI co-editor introduction"))
+                            .font(.system(size: AppTheme.FontSize.md, weight: AppTheme.FontWeight.regular))
+                            .foregroundStyle(AppTheme.Text.primaryColor)
+
+                        Text(L10n.string("Replay the introduction to Autopilot, Copilot, personalization, and GRACE."))
+                            .font(.system(size: AppTheme.FontSize.sm))
+                            .foregroundStyle(AppTheme.Text.tertiaryColor)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+
+                    Spacer(minLength: AppTheme.Spacing.lg)
+
+                    Button(L10n.string("Replay Introduction")) {
+                        AppDelegate.shared.showOnboarding(nil)
+                    }
+                    .buttonStyle(.capsule(.secondary))
+                    .fixedSize()
+                }
+            }
+
             SettingsSection(title: L10n.string("Notifications")) {
                 NotificationsPane()
             }

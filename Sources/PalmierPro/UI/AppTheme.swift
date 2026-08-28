@@ -438,9 +438,21 @@ enum AppTheme {
     }
 
     enum Onboarding {
-        static let cardWidth: CGFloat = 520
-        static let cardHeight: CGFloat = 420
-        static let welcomeHeroHeight: CGFloat = 240
+        static let cardWidth: CGFloat = 760
+        static let cardHeight: CGFloat = 590
+        static let contentMaxWidth: CGFloat = 680
+        static let visualHeight: CGFloat = 240
+        static let modeCardMinHeight: CGFloat = 132
+        static let featureCardMinHeight: CGFloat = 92
+        static let workflowCardMinHeight: CGFloat = 94
+        static let diagramNodeWidth: CGFloat = 152
+        static let timelineTrackHeight: CGFloat = 34
+        static let timelineClipHeight: CGFloat = 24
+        static let timelinePlayheadWidth: CGFloat = 2
+        static let timelineLabelWidth: CGFloat = 56
+        static let progressHeight: CGFloat = 3
+        static let progressLabelWidth: CGFloat = 44
+        static let scopeChipHeight: CGFloat = 28
         static var secondaryButtonFill: Color {
             AppTheme.Accent.primary.opacity(AppTheme.Opacity.muted)
         }

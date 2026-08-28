@@ -27,9 +27,14 @@ let package = Package(
         .package(url: "https://github.com/soniqo/speech-swift", exact: "0.0.21"),
     ],
     targets: [
+        .target(
+            name: "FilmStudioCore",
+            path: "Sources/FilmStudioCore"
+        ),
         .executableTarget(
             name: "PalmierPro",
             dependencies: [
+                "FilmStudioCore",
                 .product(name: "MCP", package: "swift-sdk"),
                 .product(name: "Sparkle", package: "Sparkle"),
                 .product(
@@ -89,6 +94,7 @@ let package = Package(
             name: "PalmierProTests",
             dependencies: [
                 "PalmierPro",
+                "FilmStudioCore",
                 .product(name: "MCP", package: "swift-sdk"),
             ],
             path: "Tests/PalmierProTests"
