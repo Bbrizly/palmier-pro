@@ -358,6 +358,20 @@ enum FilmStudioService {
         filmToolExecutable: String,
         mereRunExecutable: String
     ) async throws {
+        let snapshot = try FilmProjectLoader.load(runManifest: runManifest)
+        let project = snapshot.project
+        if project.proof.assembly,
+           !project.proof.review,
+           project.status != "revision-required",
+           snapshot.playableCutURL != nil {
+            try await review(
+                runManifest: runManifest,
+                filmToolExecutable: filmToolExecutable,
+                mereRunExecutable: mereRunExecutable
+            )
+            return
+        }
+
         let context = try await agentContext(mereRunExecutable: mereRunExecutable)
         let filmTool = try requireExecutable(filmToolExecutable)
         var environment = processEnvironment()
