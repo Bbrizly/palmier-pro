@@ -34,7 +34,7 @@ struct FilmStudioPalmierBridge {
                     runManifest: runManifest,
                     filmToolExecutable: executable
                 )
-                let timelineName = handoffTimelineName(handoff)
+                let timelineName = try handoffTimelineName(handoff)
                 if let existing = editor.timelines.first(where: { $0.name == timelineName }) {
                     editor.activateTimeline(existing.id)
                     model.noticeMessage = "Opened the existing editable Film Studio timeline."
@@ -42,12 +42,21 @@ struct FilmStudioPalmierBridge {
                 }
 
                 try await import(handoff, runManifest: runManifest, into: editor, timelineName: timelineName)
-                model.noticeMessage = "Opened an editable Film Studio timeline with \(handoff.shots.count) current shot\(handoff.shots.count == 1 ? "" : "s")."
+                let conformNote = editor.timeline.fps == handoff.project.fps
+                    ? ""
+                    : " Timing was conformed to the Palmier project at \(editor.timeline.fps) fps."
+                model.noticeMessage = "Opened an editable Film Studio timeline with \(handoff.shots.count) shot\(handoff.shots.count == 1 ? "" : "s").\(conformNote)"
             } catch {
                 model.errorMessage = error.localizedDescription
                 model.noticeMessage = nil
             }
         }
+    }
+
+    private struct AudioPlacement {
+        let asset: FilmAnimaticHandoff.Asset
+        let startSeconds: Double
+        let durationSeconds: Double?
     }
 
     private func import(
@@ -56,50 +65,68 @@ struct FilmStudioPalmierBridge {
         into editor: EditorViewModel,
         timelineName: String
     ) async throws {
-        let shotURLs = handoff.orderedShots.map { handoff.resolve($0.clipPath, relativeTo: runManifest) }
-        let audioURLs = [
-            handoff.media.dialogueBed,
-            handoff.media.musicBed,
-            handoff.media.effectsBed,
-        ].compactMap { $0 }.map { handoff.resolve($0, relativeTo: runManifest) }
-        let referencePath = handoff.media.deliveryMaster ?? handoff.media.roughCut
-        let referenceURL = referencePath.map { handoff.resolve($0, relativeTo: runManifest) }
-
-        var uniqueURLs: [URL] = []
-        var seenPaths: Set<String> = []
-        for url in shotURLs + audioURLs + [referenceURL].compactMap({ $0 }) {
-            let standardized = url.standardizedFileURL
-            if seenPaths.insert(standardized.path).inserted {
-                uniqueURLs.append(standardized)
+        try handoff.validate()
+        let pictureAssets = try handoff.orderedShots.map { shot -> FilmAnimaticHandoff.Asset in
+            guard let assetID = shot.clipAssetId,
+                  let asset = handoff.asset(id: assetID),
+                  asset.kind == "shot-clip" else {
+                throw PalmierCoreError.invalidOperation("Film Studio shot \(shot.id) has no selected clip.")
             }
+            return asset
+        }
+        let dialogue = dialoguePlacements(in: handoff)
+        let effects = effectPlacements(in: handoff)
+        let score = handoff.scoreAsset
+        let reference = handoff.referenceAsset
+
+        var requiredAssets = pictureAssets + dialogue.map(\.asset) + effects.map(\.asset)
+        if let score { requiredAssets.append(score) }
+        if let reference { requiredAssets.append(reference) }
+        requiredAssets = uniqueAssets(requiredAssets)
+
+        let projectRoot = runManifest.deletingLastPathComponent().standardizedFileURL
+        func url(for asset: FilmAnimaticHandoff.Asset) -> URL {
+            projectRoot.appending(path: asset.relativePath).standardizedFileURL
         }
 
-        let summary = try await editor.importFinderItems(
-            uniqueURLs,
-            into: editor.mediaPanelCurrentFolderId,
-            finalize: false
-        )
-        guard summary.assets.count == uniqueURLs.count else {
-            throw PalmierFilmStudioModel.StudioError.importRejected
+        var mediaByPath: [String: MediaAsset] = [:]
+        for asset in editor.mediaAssets {
+            mediaByPath[asset.url.standardizedFileURL.path] = asset
         }
 
-        var assetsByPath: [String: MediaAsset] = [:]
-        for asset in summary.assets {
-            guard await editor.finalizeImportedAsset(asset, batchManifestUpdate: true) else {
+        let missingAssets = requiredAssets.filter { mediaByPath[url(for: $0).path] == nil }
+        if !missingAssets.isEmpty {
+            let missingURLs = missingAssets.map(url(for:))
+            let summary = try await editor.importFinderItems(
+                missingURLs,
+                into: editor.mediaPanelCurrentFolderId,
+                finalize: false
+            )
+            guard summary.assets.count == missingURLs.count else {
+                throw PalmierFilmStudioModel.StudioError.importRejected
+            }
+            for asset in summary.assets {
+                guard await editor.finalizeImportedAsset(asset, batchManifestUpdate: true) else {
+                    throw PalmierCoreError.invalidOperation(
+                        "Palmier could not read Film Studio media: \(asset.url.lastPathComponent)"
+                    )
+                }
+                mediaByPath[asset.url.standardizedFileURL.path] = asset
+            }
+            editor.flushPendingManifestMetadataUpdates()
+        }
+
+        var mediaByHandoffID: [String: MediaAsset] = [:]
+        for asset in requiredAssets {
+            let assetURL = url(for: asset)
+            guard let media = mediaByPath[assetURL.path] ?? editor.mediaAssets.first(where: {
+                $0.url.standardizedFileURL.path == assetURL.path
+            }) else {
                 throw PalmierCoreError.invalidOperation(
-                    "Palmier could not read Film Studio media: \(asset.url.lastPathComponent)"
+                    "The Film Studio handoff is missing \(asset.relativePath)."
                 )
             }
-            assetsByPath[asset.url.standardizedFileURL.path] = asset
-        }
-        editor.flushPendingManifestMetadataUpdates()
-
-        for url in shotURLs {
-            guard assetsByPath[url.standardizedFileURL.path] != nil else {
-                throw PalmierCoreError.invalidOperation(
-                    "The Film Studio handoff is missing \(url.lastPathComponent)."
-                )
-            }
+            mediaByHandoffID[asset.id] = media
         }
 
         let timelineID = editor.createTimeline(name: timelineName, activate: true)
@@ -108,79 +135,194 @@ struct FilmStudioPalmierBridge {
         }
 
         let pictureTrack = editor.insertTrack(at: 0, type: .video)
-        if editor.timeline.tracks.indices.contains(pictureTrack) {
-            try? editor.setTrackName(id: editor.timeline.tracks[pictureTrack].id, to: handoff.timeline.tracks.picture)
+        guard editor.timeline.tracks.indices.contains(pictureTrack) else {
+            throw PalmierCoreError.invalidOperation("Palmier could not create the Film Studio picture track.")
         }
+        let pictureTrackID = editor.timeline.tracks[pictureTrack].id
+        try? editor.setTrackName(id: pictureTrackID, to: "Film Studio · Picture")
 
         let fps = max(1.0, Double(editor.timeline.fps))
-        for shot in handoff.orderedShots {
-            let url = handoff.resolve(shot.clipPath, relativeTo: runManifest)
-            guard let asset = assetsByPath[url.standardizedFileURL.path] else { continue }
-            let startFrame = max(0, Int((shot.timeline.startSeconds * fps).rounded()))
-            let segmentStart = shot.timeline.trimInSeconds
-            let segmentEnd = segmentStart + shot.timeline.durationSeconds
+        var clipAudioTrackID: String?
+        for (shot, handoffAsset) in zip(handoff.orderedShots, pictureAssets) {
+            guard let media = mediaByHandoffID[handoffAsset.id],
+                  let pictureIndex = editor.timeline.tracks.firstIndex(where: { $0.id == pictureTrackID }) else {
+                throw PalmierCoreError.invalidOperation("Palmier lost the Film Studio picture track during import.")
+            }
+
+            if clipAudioTrackID.flatMap({ id in editor.timeline.tracks.firstIndex(where: { $0.id == id }) }) == nil {
+                let inserted = editor.insertTrack(at: editor.timeline.tracks.count, type: .audio)
+                if editor.timeline.tracks.indices.contains(inserted) {
+                    clipAudioTrackID = editor.timeline.tracks[inserted].id
+                    if let clipAudioTrackID {
+                        try? editor.setTrackName(id: clipAudioTrackID, to: "Film Studio · Clip Audio")
+                    }
+                }
+            }
+            let linkedAudioIndex = clipAudioTrackID.flatMap { id in
+                editor.timeline.tracks.firstIndex(where: { $0.id == id })
+            }
+            let startFrame = frame(forSeconds: shot.timelineStartSeconds, fps: fps)
             editor.addClips(
-                assets: [asset],
-                trackIndex: pictureTrack,
+                assets: [media],
+                trackIndex: pictureIndex,
                 startFrame: startFrame,
-                segments: [asset.id: segmentStart...segmentEnd]
+                linkedAudioTrackIndex: linkedAudioIndex,
+                segments: [media.id: 0...shot.durationSeconds]
             )
         }
 
-        try addAudioBed(
-            handoff.media.dialogueBed,
-            trackName: handoff.timeline.tracks.dialogue,
-            handoff: handoff,
-            runManifest: runManifest,
-            assetsByPath: assetsByPath,
-            editor: editor
+        try addAudioPlacements(
+            dialogue,
+            trackName: "Film Studio · Dialogue",
+            mediaByHandoffID: mediaByHandoffID,
+            editor: editor,
+            fps: fps
         )
-        try addAudioBed(
-            handoff.media.musicBed,
-            trackName: handoff.timeline.tracks.music,
-            handoff: handoff,
-            runManifest: runManifest,
-            assetsByPath: assetsByPath,
-            editor: editor
+        try addAudioPlacements(
+            effects,
+            trackName: "Film Studio · Effects",
+            mediaByHandoffID: mediaByHandoffID,
+            editor: editor,
+            fps: fps
         )
-        try addAudioBed(
-            handoff.media.effectsBed,
-            trackName: handoff.timeline.tracks.effects,
-            handoff: handoff,
-            runManifest: runManifest,
-            assetsByPath: assetsByPath,
-            editor: editor
-        )
+        if let score, let media = mediaByHandoffID[score.id] {
+            try addAudioPlacements(
+                [AudioPlacement(asset: score, startSeconds: 0, durationSeconds: nil)],
+                trackName: "Film Studio · Score",
+                mediaByHandoffID: [score.id: media],
+                editor: editor,
+                fps: fps
+            )
+        }
+
+        let markers = handoff.orderedShots.map { shot in
+            TimelineMarker(
+                name: shot.id,
+                startFrame: frame(forSeconds: shot.timelineStartSeconds, fps: fps),
+                durationFrames: max(1, frame(forSeconds: shot.durationSeconds, fps: fps)),
+                comment: "\(shot.purpose)\nTake \(shot.take) · \(shot.transition)"
+            )
+        }
+        _ = try? editor.changeTimelineMarkers(creates: markers, actionName: "Import Film Studio Markers")
 
         editor.currentFrame = 0
         editor.revealTimelineTabBarIfMultiple()
         editor.notifyTimelineChanged(refreshVisuals: false)
     }
 
-    private func addAudioBed(
-        _ relativePath: String?,
+    private func addAudioPlacements(
+        _ placements: [AudioPlacement],
         trackName: String,
-        handoff: FilmAnimaticHandoff,
-        runManifest: URL,
-        assetsByPath: [String: MediaAsset],
-        editor: EditorViewModel
+        mediaByHandoffID: [String: MediaAsset],
+        editor: EditorViewModel,
+        fps: Double
     ) throws {
-        guard let relativePath else { return }
-        let url = handoff.resolve(relativePath, relativeTo: runManifest)
-        guard let asset = assetsByPath[url.standardizedFileURL.path] else {
-            throw PalmierCoreError.invalidOperation("The Film Studio handoff is missing \(url.lastPathComponent).")
+        guard !placements.isEmpty else { return }
+        let inserted = editor.insertTrack(at: editor.timeline.tracks.count, type: .audio)
+        guard editor.timeline.tracks.indices.contains(inserted) else {
+            throw PalmierCoreError.invalidOperation("Palmier could not create \(trackName).")
         }
-        let trackIndex = editor.insertTrack(at: editor.timeline.tracks.count, type: .audio)
-        editor.addClips(assets: [asset], trackIndex: trackIndex, startFrame: 0)
-        if editor.timeline.tracks.indices.contains(trackIndex) {
-            try? editor.setTrackName(id: editor.timeline.tracks[trackIndex].id, to: trackName)
+        let trackID = editor.timeline.tracks[inserted].id
+        try? editor.setTrackName(id: trackID, to: trackName)
+
+        for placement in placements {
+            guard let media = mediaByHandoffID[placement.asset.id],
+                  let trackIndex = editor.timeline.tracks.firstIndex(where: { $0.id == trackID }) else {
+                throw PalmierCoreError.invalidOperation("Palmier could not place \(placement.asset.relativePath).")
+            }
+            var segments: [String: ClosedRange<Double>] = [:]
+            if let duration = placement.durationSeconds {
+                segments[media.id] = 0...duration
+            }
+            editor.addClips(
+                assets: [media],
+                trackIndex: trackIndex,
+                startFrame: frame(forSeconds: placement.startSeconds, fps: fps),
+                segments: segments
+            )
         }
     }
 
-    private func handoffTimelineName(_ handoff: FilmAnimaticHandoff) -> String {
-        let signature = handoff.orderedShots.map {
-            "\($0.shotId)|\($0.take)|\($0.clipPath)|\($0.timeline.startSeconds)|\($0.timeline.durationSeconds)|\($0.timeline.trimInSeconds)|\($0.timeline.trimOutSeconds)"
-        }.joined(separator: "\n")
+    private func dialoguePlacements(in handoff: FilmAnimaticHandoff) -> [AudioPlacement] {
+        var placements: [AudioPlacement] = []
+        for shot in handoff.orderedShots {
+            let slug = filmSlug(shot.id)
+            for (index, line) in shot.dialogue.enumerated() {
+                let path = "audio/dialogue/\(slug)-\(String(format: "%02d", index + 1)).wav"
+                guard let asset = handoff.assets.first(where: { $0.relativePath == path }) else { continue }
+                placements.append(
+                    AudioPlacement(
+                        asset: asset,
+                        startSeconds: shot.timelineStartSeconds + line.startSeconds,
+                        durationSeconds: nil
+                    )
+                )
+            }
+        }
+        return placements
+    }
+
+    private func effectPlacements(in handoff: FilmAnimaticHandoff) -> [AudioPlacement] {
+        var placements: [AudioPlacement] = []
+        for shot in handoff.orderedShots {
+            let slug = filmSlug(shot.id)
+            for (index, cue) in shot.soundEffects.enumerated() {
+                let path = "audio/sfx/\(slug)-\(String(format: "%02d", index + 1)).wav"
+                guard let asset = handoff.assets.first(where: { $0.relativePath == path }) else { continue }
+                placements.append(
+                    AudioPlacement(
+                        asset: asset,
+                        startSeconds: shot.timelineStartSeconds + cue.startSeconds,
+                        durationSeconds: cue.durationSeconds
+                    )
+                )
+            }
+        }
+        return placements
+    }
+
+    private func uniqueAssets(_ assets: [FilmAnimaticHandoff.Asset]) -> [FilmAnimaticHandoff.Asset] {
+        var seen = Set<String>()
+        return assets.filter { seen.insert($0.id).inserted }
+    }
+
+    private func frame(forSeconds seconds: Double, fps: Double) -> Int {
+        max(0, Int((seconds * fps).rounded()))
+    }
+
+    private func handoffTimelineName(_ handoff: FilmAnimaticHandoff) throws -> String {
+        var components = [
+            handoff.contractVersion,
+            handoff.source.projectId,
+            String(handoff.project.fps),
+            String(handoff.project.durationMilliseconds),
+            handoff.project.aspectRatio,
+            String(handoff.project.width ?? 0),
+            String(handoff.project.height ?? 0),
+        ]
+        for shot in handoff.orderedShots {
+            components.append(contentsOf: [
+                shot.id,
+                String(shot.order),
+                String(shot.timelineStartMilliseconds),
+                String(shot.durationMilliseconds),
+                String(shot.take),
+                String(shot.seed),
+                shot.transition,
+                shot.clipAssetId ?? "",
+            ])
+            if let assetID = shot.clipAssetId, let asset = handoff.asset(id: assetID) {
+                components.append(asset.sha256)
+            }
+        }
+        let editorialKinds: Set<String> = [
+            "dialogue", "dialogue-line", "sound-effect", "score",
+            "rough-cut", "final-master", "delivery-master",
+        ]
+        for asset in handoff.assets.filter({ editorialKinds.contains($0.kind) }).sorted(by: { $0.id < $1.id }) {
+            components.append(contentsOf: [asset.id, asset.kind, asset.relativePath, asset.sha256])
+        }
+        let signature = components.joined(separator: "\u{1F}")
         return "Film Studio — \(handoff.project.title) [\(stableShortHash(signature))]"
     }
 
@@ -190,7 +332,25 @@ struct FilmStudioPalmierBridge {
             hash ^= UInt64(byte)
             hash &*= 1_099_511_628_211
         }
-        return String(String(hash, radix: 16).suffix(8))
+        return String(String(hash, radix: 16).suffix(12))
+    }
+
+    private func filmSlug(_ value: String) -> String {
+        var output = ""
+        var pendingDash = false
+        for scalar in value.lowercased().unicodeScalars {
+            let isLetter = scalar.value >= 97 && scalar.value <= 122
+            let isDigit = scalar.value >= 48 && scalar.value <= 57
+            if isLetter || isDigit {
+                if pendingDash && !output.isEmpty { output.append("-") }
+                output.append(Character(String(scalar)))
+                pendingDash = false
+            } else {
+                pendingDash = true
+            }
+            if output.count >= 64 { break }
+        }
+        return output.isEmpty ? "film" : String(output.prefix(64)).trimmingCharacters(in: CharacterSet(charactersIn: "-"))
     }
 }
 
