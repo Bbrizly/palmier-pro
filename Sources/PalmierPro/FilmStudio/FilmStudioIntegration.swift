@@ -11,7 +11,7 @@ struct FilmStudioPalmierBridge {
             model.errorMessage = PalmierFilmStudioModel.StudioError.noPalmierProject.localizedDescription
             return
         }
-        guard let runManifest = model.snapshot?.runManifest else {
+        guard let snapshot = model.snapshot else {
             model.errorMessage = PalmierFilmStudioModel.StudioError.noProject.localizedDescription
             return
         }
@@ -26,6 +26,8 @@ struct FilmStudioPalmierBridge {
             return
         }
         let executable = model.filmToolExecutable
+        let runManifest = snapshot.runManifest
+        let projectRoot = snapshot.root
         model.errorMessage = nil
         model.noticeMessage = "Preparing editable Palmier timeline…"
 
@@ -44,7 +46,7 @@ struct FilmStudioPalmierBridge {
                     return
                 }
 
-                try await import(handoff, runManifest: runManifest, into: editor, timelineName: timelineName)
+                try await import(handoff, projectRoot: projectRoot, into: editor, timelineName: timelineName)
                 let conformNote = editor.timeline.fps == handoff.project.fps
                     ? ""
                     : " Timing was conformed to the Palmier project at \(editor.timeline.fps) fps."
@@ -66,7 +68,7 @@ struct FilmStudioPalmierBridge {
 
     private func import(
         _ handoff: FilmAnimaticHandoff,
-        runManifest: URL,
+        projectRoot: URL,
         into editor: EditorViewModel,
         timelineName: String
     ) async throws {
@@ -91,9 +93,9 @@ struct FilmStudioPalmierBridge {
         if let reference { requiredAssets.append(reference) }
         requiredAssets = uniqueAssets(requiredAssets)
 
-        let projectRoot = runManifest.deletingLastPathComponent().standardizedFileURL
+        let resolvedProjectRoot = projectRoot.standardizedFileURL.resolvingSymlinksInPath()
         func url(for asset: FilmAnimaticHandoff.Asset) -> URL {
-            projectRoot.appending(path: asset.relativePath).standardizedFileURL
+            resolvedProjectRoot.appending(path: asset.relativePath).standardizedFileURL
         }
 
         var mediaByPath: [String: MediaAsset] = [:]
