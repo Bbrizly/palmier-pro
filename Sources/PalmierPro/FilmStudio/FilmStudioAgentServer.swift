@@ -1,3 +1,4 @@
+import Darwin
 import Foundation
 
 actor FilmStudioAgentServer {
@@ -35,6 +36,7 @@ actor FilmStudioAgentServer {
         process.executableURL = mereRun
         process.arguments = [
             "api", "serve",
+            "--engine", model.servingEngine,
             "--model", model.id,
             "--host", endpoint.host,
             "--port", String(endpoint.port),
@@ -70,13 +72,7 @@ actor FilmStudioAgentServer {
         }
         self.process = nil
         managedEndpoint = nil
-        guard process.isRunning else { return }
-
-        process.terminate()
-        for _ in 0..<20 {
-            if !process.isRunning { return }
-            try? await Task.sleep(for: .milliseconds(100))
-        }
+        await terminate(process)
     }
 
     private func waitUntilHealthy(process: Process, endpoint: Endpoint) async throws {
@@ -137,6 +133,18 @@ actor FilmStudioAgentServer {
         if normalized == "::1" || normalized == "[::1]" { return "::1" }
         if normalized.hasPrefix("127.") { return normalized }
         return nil
+    }
+
+    private func terminate(_ process: Process) async {
+        guard process.isRunning else { return }
+        process.terminate()
+        for _ in 0..<20 {
+            if !process.isRunning { return }
+            try? await Task.sleep(for: .milliseconds(100))
+        }
+        if process.isRunning {
+            _ = Darwin.kill(process.processIdentifier, SIGKILL)
+        }
     }
 
     private func stopManagedProcess() {
