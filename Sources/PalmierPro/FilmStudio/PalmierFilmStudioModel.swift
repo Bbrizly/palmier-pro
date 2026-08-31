@@ -11,6 +11,7 @@ final class PalmierFilmStudioModel: ObservableObject {
         case noPalmierProject
         case importRejected
         case setupIncomplete
+        case unknownShot(String)
 
         var errorDescription: String? {
             switch self {
@@ -19,11 +20,13 @@ final class PalmierFilmStudioModel: ObservableObject {
             case .noPlayableCut:
                 "GRACE has not produced a playable cut yet."
             case .noPalmierProject:
-                "Open a Palmier project before importing the GRACE cut."
+                "Open a Palmier project before opening the editable Film Studio timeline."
             case .importRejected:
-                "Palmier did not import the GRACE cut. Check that the generated file is a supported media type."
+                "Palmier could not import one or more verified Film Studio assets. Check that the generated files are supported media types."
             case .setupIncomplete:
                 "Finish the setup required for this Film Studio action, then retry."
+            case .unknownShot(let id):
+                "The Film Studio project no longer contains shot \(id). Refresh the project and retry."
             }
         }
     }
@@ -72,6 +75,7 @@ final class PalmierFilmStudioModel: ObservableObject {
     private var watcher: FilmStudioProjectWatcher?
     private var watchedRoot: URL?
     private var projectLoadID = UUID()
+    private var runtimeRefreshID = UUID()
     private var restoredLastProject = false
 
     init() {
@@ -124,14 +128,6 @@ final class PalmierFilmStudioModel: ObservableObject {
         snapshot?.project.reviewRequests.contains { $0.status == "pending" } == true
     }
 
-    var requiresCreativeRevision: Bool {
-        guard let project = snapshot?.project else { return false }
-        return project.status == "revision-required"
-            && project.proof.assembly
-            && !project.proof.review
-            && !hasPendingReviewRequests
-    }
-
     var needsHumanReviewDecision: Bool {
         guard pendingGate == "picture-lock",
               !hasPendingReviewRequests,
@@ -179,17 +175,6 @@ final class PalmierFilmStudioModel: ObservableObject {
         }
     }
 
-    var canReview: Bool {
-        guard let project = snapshot?.project else { return false }
-        return playableCutURL != nil
-            && project.proof.assembly
-            && !project.proof.review
-            && project.status != "revision-required"
-            && productionReady
-            && !isCompleted
-            && !isBusy
-    }
-
     var canReroll: Bool {
         snapshot != nil
             && runtime?.filmToolsReady == true
@@ -198,7 +183,10 @@ final class PalmierFilmStudioModel: ObservableObject {
     }
 
     var hasInterruptedWork: Bool {
-        snapshot?.project.jobs.contains { $0.status == "running" } == true
+        guard let project = snapshot?.project else { return false }
+        return project.status == "running"
+            || project.departments.contains { $0.status == "running" }
+            || project.jobs.contains { $0.status == "running" }
     }
 
     private var advanceRequirement: AdvanceRequirement {
@@ -232,16 +220,13 @@ final class PalmierFilmStudioModel: ObservableObject {
         let slug = effectiveNewFilmTitle.lowercased()
             .replacingOccurrences(of: "[^a-z0-9]+", with: "-", options: .regularExpression)
             .trimmingCharacters(in: CharacterSet(charactersIn: "-"))
-        return newFilmDirectory.appending(
-            path: slug.isEmpty ? "untitled-film" : slug,
-            directoryHint: .isDirectory
-        )
+        let folder = slug.isEmpty ? "untitled-film" : String(slug.prefix(80))
+        return newFilmDirectory.appending(path: folder, directoryHint: .isDirectory)
     }
 
     func activate() {
         Task { @MainActor [weak self] in
-            guard let self else { return }
-            await self.refreshRuntime()
+            await self?.refreshRuntime()
         }
         guard !restoredLastProject else { return }
         restoredLastProject = true
@@ -254,7 +239,7 @@ final class PalmierFilmStudioModel: ObservableObject {
         guard !isBusy else { return }
         let panel = NSOpenPanel()
         panel.title = "Open Film"
-        panel.message = "Choose the run.json for a GRACE film."
+        panel.message = "Choose a GRACE run manifest JSON."
         panel.prompt = "Open Film"
         panel.allowedContentTypes = [.json]
         panel.allowsMultipleSelection = false
@@ -277,9 +262,7 @@ final class PalmierFilmStudioModel: ObservableObject {
 
     func openProject(_ input: URL, reportErrors: Bool = true) {
         guard !isBusy else { return }
-        let runManifest = input.lastPathComponent == "run.json"
-            ? input.standardizedFileURL
-            : input.appending(path: "run.json").standardizedFileURL
+        let runManifest = resolvedRunManifestInput(input)
         projectLoadTask?.cancel()
         projectLoadID = UUID()
         let requestID = projectLoadID
@@ -294,6 +277,7 @@ final class PalmierFilmStudioModel: ObservableObject {
             } catch is CancellationError {
                 return
             } catch {
+                guard self.projectLoadID == requestID else { return }
                 if reportErrors { self.errorMessage = error.localizedDescription }
             }
         }
@@ -314,12 +298,17 @@ final class PalmierFilmStudioModel: ObservableObject {
     }
 
     func refreshRuntime() async {
-        guard !isRuntimeRefreshing else { return }
+        runtimeRefreshID = UUID()
+        let requestID = runtimeRefreshID
+        let filmToolExecutable = filmToolExecutable
+        let mereRunExecutable = mereRunExecutable
         isRuntimeRefreshing = true
-        runtime = await FilmStudioService.inspectRuntime(
+        let inspected = await FilmStudioService.inspectRuntime(
             filmToolExecutable: filmToolExecutable,
             mereRunExecutable: mereRunExecutable
         )
+        guard runtimeRefreshID == requestID else { return }
+        runtime = inspected
         isRuntimeRefreshing = false
     }
 
@@ -352,7 +341,7 @@ final class PalmierFilmStudioModel: ObservableObject {
         let mereRunExecutable = mereRunExecutable
         runSetupRepair(
             activity: "Configuring Pi for mere.run…",
-            success: "Pi is configured for the selected local agent model."
+            success: "Pi is configured for the selected local producer model."
         ) {
             try await FilmStudioService.configurePiProvider(
                 mereRunExecutable: mereRunExecutable,
@@ -365,7 +354,7 @@ final class PalmierFilmStudioModel: ObservableObject {
         guard let runtime else { return }
         copyToPasteboard(FilmStudioService.modelSetupCommand(runtime: runtime, mereRunExecutable: mereRunExecutable))
         noticeMessage = runtime.recommendedModel == nil
-            ? "Copied the Mere agent setup command."
+            ? "Copied the Mere producer setup command."
             : "Copied the recommended model install command. Review any model terms shown by Mere before accepting them."
     }
 
@@ -421,6 +410,8 @@ final class PalmierFilmStudioModel: ObservableObject {
                 self.newFilmIdea = ""
                 self.newFilmTitle = ""
                 self.noticeMessage = "Film created. Complete the brief, then approve it when it looks right."
+            } catch is CancellationError {
+                return
             } catch {
                 self.errorMessage = error.localizedDescription
             }
@@ -468,6 +459,8 @@ final class PalmierFilmStudioModel: ObservableObject {
                 self.noticeMessage = self.briefNeedsInput
                     ? "Brief updated. Resolve the remaining questions before approval."
                     : "Brief is complete. Review it, then approve the brief."
+            } catch is CancellationError {
+                return
             } catch {
                 self.errorMessage = error.localizedDescription
             }
@@ -497,10 +490,14 @@ final class PalmierFilmStudioModel: ObservableObject {
                     )
                     await self.reloadCurrentProject(reportErrors: true)
                     self.noticeMessage = "Production is configured and the required local models passed preflight. Review the plan, then approve production."
+                } catch is CancellationError {
+                    return
                 } catch {
                     await self.reloadCurrentProject(reportErrors: false)
                     self.errorMessage = "Production settings were saved, but model preflight failed. \(error.localizedDescription)"
                 }
+            } catch is CancellationError {
+                return
             } catch {
                 self.errorMessage = error.localizedDescription
             }
@@ -534,6 +531,8 @@ final class PalmierFilmStudioModel: ObservableObject {
                 self.noticeMessage = decision == "approve"
                     ? "Human review is recorded against this exact cut. Picture lock is ready for approval."
                     : "Revision requests are recorded. Prepare each requested reroll before continuing."
+            } catch is CancellationError {
+                return
             } catch {
                 self.errorMessage = error.localizedDescription
             }
@@ -545,12 +544,20 @@ final class PalmierFilmStudioModel: ObservableObject {
               let runManifest = snapshot?.runManifest,
               let gate = pendingGate else { return }
         let filmToolExecutable = filmToolExecutable
+        let filmToolPath = runtime?.filmToolPath
         let approvedBy = NSFullUserName().isEmpty ? "macOS user" : NSFullUserName()
         beginActivity("Approving \(displayName(gate))…")
         commandTask = Task { @MainActor [weak self] in
             guard let self else { return }
             defer { self.endActivity() }
             do {
+                if gate == "production" {
+                    guard let filmToolPath else { throw StudioError.setupIncomplete }
+                    try await FilmStudioService.preflightProduction(
+                        runManifest: runManifest,
+                        filmToolPath: filmToolPath
+                    )
+                }
                 try await FilmStudioService.approve(
                     runManifest: runManifest,
                     gate: gate,
@@ -561,8 +568,13 @@ final class PalmierFilmStudioModel: ObservableObject {
                 self.noticeMessage = self.isCompleted
                     ? "Film completed. The verified master is ready for Palmier."
                     : "Approved \(self.displayName(gate)). You can continue production."
+            } catch is CancellationError {
+                return
             } catch {
-                self.errorMessage = error.localizedDescription
+                await self.reloadCurrentProject(reportErrors: false)
+                self.errorMessage = gate == "production"
+                    ? "Production readiness changed before approval. \(error.localizedDescription)"
+                    : error.localizedDescription
             }
         }
     }
@@ -605,36 +617,8 @@ final class PalmierFilmStudioModel: ObservableObject {
                 } else {
                     self.noticeMessage = "Production advanced."
                 }
-            } catch {
-                self.errorMessage = error.localizedDescription
+            } catch is CancellationError {
                 await self.reloadCurrentProject(reportErrors: false)
-            }
-        }
-    }
-
-    func runReview() {
-        guard canReview, let runManifest = snapshot?.runManifest else {
-            errorMessage = StudioError.setupIncomplete.localizedDescription
-            return
-        }
-        let filmToolExecutable = filmToolExecutable
-        let mereRunExecutable = mereRunExecutable
-        beginActivity("Reviewing film…")
-        commandTask = Task { @MainActor [weak self] in
-            guard let self else { return }
-            defer { self.endActivity() }
-            do {
-                try await FilmStudioService.review(
-                    runManifest: runManifest,
-                    filmToolExecutable: filmToolExecutable,
-                    mereRunExecutable: mereRunExecutable
-                )
-                await self.reloadCurrentProject(reportErrors: true)
-                if self.requiresCreativeRevision {
-                    self.noticeMessage = "Independent review requested revisions. Reroll the affected shots, then continue production to rebuild the cut."
-                } else {
-                    self.noticeMessage = "Review finished. Watch the cut and record your human review decision before picture lock."
-                }
             } catch {
                 self.errorMessage = error.localizedDescription
                 await self.reloadCurrentProject(reportErrors: false)
@@ -647,6 +631,10 @@ final class PalmierFilmStudioModel: ObservableObject {
         guard canReroll,
               !reason.isEmpty,
               let runManifest = snapshot?.runManifest else { return }
+        guard snapshot?.productionPlan?.shots.contains(where: { $0.id == shotID }) == true else {
+            errorMessage = StudioError.unknownShot(shotID).localizedDescription
+            return
+        }
         let filmToolExecutable = filmToolExecutable
         beginActivity("Preparing \(shotID) reroll…")
         commandTask = Task { @MainActor [weak self] in
@@ -661,6 +649,8 @@ final class PalmierFilmStudioModel: ObservableObject {
                 )
                 await self.reloadCurrentProject(reportErrors: true)
                 self.noticeMessage = "\(shotID) is prepared for a targeted reroll. Continue production when the requested revisions are resolved."
+            } catch is CancellationError {
+                return
             } catch {
                 self.errorMessage = error.localizedDescription
             }
@@ -668,8 +658,13 @@ final class PalmierFilmStudioModel: ObservableObject {
     }
 
     func recover() {
-        guard !isBusy, let runManifest = snapshot?.runManifest else {
+        guard !isBusy,
+              let runManifest = snapshot?.runManifest else {
             errorMessage = StudioError.noProject.localizedDescription
+            return
+        }
+        guard runtime?.filmToolsReady == true else {
+            errorMessage = StudioError.setupIncomplete.localizedDescription
             return
         }
         let filmToolExecutable = filmToolExecutable
@@ -684,31 +679,8 @@ final class PalmierFilmStudioModel: ObservableObject {
                 )
                 await self.reloadCurrentProject(reportErrors: true)
                 self.noticeMessage = "Interrupted work was recovered."
-            } catch {
-                self.errorMessage = error.localizedDescription
-            }
-        }
-    }
-
-    func importPlayableCut(into editor: EditorViewModel) {
-        guard !isBusy else { return }
-        guard let cutURL = playableCutURL else {
-            errorMessage = StudioError.noPlayableCut.localizedDescription
-            return
-        }
-        beginActivity("Importing cut into Palmier…")
-        commandTask = Task { @MainActor [weak self, weak editor] in
-            guard let self else { return }
-            defer { self.endActivity() }
-            do {
-                guard let editor else { throw StudioError.noPalmierProject }
-                let summary = try await editor.importFinderItems(
-                    [cutURL],
-                    into: editor.mediaPanelCurrentFolderId,
-                    finalize: true
-                )
-                guard summary.assetCount > 0 else { throw StudioError.importRejected }
-                self.noticeMessage = "Imported \(cutURL.lastPathComponent) into the active Palmier project."
+            } catch is CancellationError {
+                return
             } catch {
                 self.errorMessage = error.localizedDescription
             }
@@ -754,6 +726,8 @@ final class PalmierFilmStudioModel: ObservableObject {
                 try await operation()
                 await self.refreshRuntime()
                 self.noticeMessage = success
+            } catch is CancellationError {
+                return
             } catch {
                 self.errorMessage = error.localizedDescription
                 await self.refreshRuntime()
@@ -822,9 +796,20 @@ final class PalmierFilmStudioModel: ObservableObject {
             let loaded = try await FilmStudioService.loadProject(runManifest: runManifest)
             guard snapshot?.runManifest.standardizedFileURL == runManifest.standardizedFileURL else { return }
             applyLoadedProject(loaded)
+        } catch is CancellationError {
+            return
         } catch {
             if reportErrors { errorMessage = error.localizedDescription }
         }
+    }
+
+    private func resolvedRunManifestInput(_ input: URL) -> URL {
+        let standardized = input.standardizedFileURL
+        var isDirectory: ObjCBool = false
+        if FileManager.default.fileExists(atPath: standardized.path, isDirectory: &isDirectory), isDirectory.boolValue {
+            return standardized.appending(path: "run.json").standardizedFileURL
+        }
+        return standardized
     }
 
     private func copyToPasteboard(_ value: String) {
