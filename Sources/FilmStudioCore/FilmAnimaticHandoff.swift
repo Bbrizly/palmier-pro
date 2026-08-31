@@ -223,12 +223,14 @@ public struct FilmAnimaticHandoff: Codable, Sendable, Equatable {
             guard castIDs.insert(member.id).inserted else {
                 throw ValidationError.duplicateCastID(member.id)
             }
+            // Current GRACE production contracts require wardrobe and voice
+            // fields to be present, but explicitly allow empty strings. The
+            // handoff exporter always emits them; only identity/name/visual are
+            // semantic non-empty invariants.
             guard !member.id.isEmpty,
                   !member.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-                  !member.visual.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-                  !member.wardrobe.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-                  !member.voice.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-                throw ValidationError.invalidProject("cast entries require id, name, visual, wardrobe, and voice")
+                  !member.visual.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                throw ValidationError.invalidProject("cast entries require id, name, and visual identity")
             }
         }
 
@@ -237,11 +239,12 @@ public struct FilmAnimaticHandoff: Codable, Sendable, Equatable {
             guard locationIDs.insert(location.id).inserted else {
                 throw ValidationError.duplicateLocationID(location.id)
             }
+            // Ambience is required structurally upstream but may intentionally
+            // be empty; location identity and visual canon may not be.
             guard !location.id.isEmpty,
                   !location.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-                  !location.visual.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-                  !location.ambience.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-                throw ValidationError.invalidProject("location entries require id, name, visual, and ambience")
+                  !location.visual.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                throw ValidationError.invalidProject("location entries require id, name, and visual identity")
             }
         }
 
