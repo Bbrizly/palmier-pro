@@ -53,19 +53,44 @@ struct FilmStudioCreativeReview: Decodable, Sendable, Equatable {
         strengths = try container.decodeIfPresent([String].self, forKey: .strengths) ?? []
         deliveryNotes = try container.decodeIfPresent([String].self, forKey: .deliveryNotes) ?? []
     }
+
+    func validate(knownShotIDs: Set<String>) throws {
+        guard decision == "pass" || decision == "revise" else {
+            throw FilmStudioServiceError.invalidResponse("Independent review decision must be pass or revise.")
+        }
+        for issue in issues {
+            guard !issue.code.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                  !issue.severity.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                  !issue.message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                throw FilmStudioServiceError.invalidResponse("Independent review contains an incomplete issue.")
+            }
+            if let shotID = issue.shotId, !knownShotIDs.contains(shotID) {
+                throw FilmStudioServiceError.invalidResponse("Independent review references unknown shot \(shotID).")
+            }
+        }
+        for reroll in rerolls {
+            guard knownShotIDs.contains(reroll.shotId), !reroll.note.isEmpty else {
+                throw FilmStudioServiceError.invalidResponse("Independent review contains an invalid reroll request.")
+            }
+        }
+    }
 }
 
 extension FilmStudioService {
     @concurrent
     static func loadCreativeReview(runManifest: URL) async throws -> FilmStudioCreativeReview? {
-        let root = runManifest.lastPathComponent == "run.json"
-            ? runManifest.deletingLastPathComponent()
-            : runManifest
-        let url = root.appending(path: "reviews/creative-review.json")
+        try Task.checkCancellation()
+        let workspace = try FilmProjectLoader.load(runManifest: runManifest)
+        let url = workspace.root.appending(path: "reviews/creative-review.json")
         guard FileManager.default.fileExists(atPath: url.path) else { return nil }
 
         do {
-            return try JSONDecoder().decode(FilmStudioCreativeReview.self, from: Data(contentsOf: url))
+            let review = try JSONDecoder().decode(FilmStudioCreativeReview.self, from: Data(contentsOf: url))
+            let knownShotIDs = Set(workspace.productionPlan?.shots.map(\.id) ?? workspace.project.shots.map(\.id))
+            try review.validate(knownShotIDs: knownShotIDs)
+            return review
+        } catch let error as FilmStudioServiceError {
+            throw error
         } catch {
             throw FilmStudioServiceError.invalidResponse(
                 "Could not read the independent review: \(error.localizedDescription)"
@@ -93,25 +118,37 @@ extension FilmStudioService {
                 "Choose at least one shot to revise so the workflow has an actionable next step."
             )
         }
-        guard rerolls.allSatisfy({
-            !$0.shotID.isEmpty
-                && !$0.note.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+
+        let workspace = try FilmProjectLoader.load(runManifest: runManifest)
+        let knownShotIDs = Set(workspace.productionPlan?.shots.map(\.id) ?? workspace.project.shots.map(\.id))
+        var seenShotIDs = Set<String>()
+        guard rerolls.allSatisfy({ reroll in
+            let shotID = reroll.shotID.trimmingCharacters(in: .whitespacesAndNewlines)
+            let revision = reroll.note.trimmingCharacters(in: .whitespacesAndNewlines)
+            return !shotID.isEmpty
+                && !revision.isEmpty
+                && knownShotIDs.contains(shotID)
+                && seenShotIDs.insert(shotID).inserted
         }) else {
             throw FilmStudioServiceError.invalidResponse(
-                "Every reroll request needs a shot and a specific revision note."
+                "Every reroll request must target one unique current shot and include a specific revision note."
             )
         }
 
+        let filmTool = try await FilmStudioRuntimeCompatibility.requireFilmTools(filmToolPath)
         var arguments = [
-            "review-decision", runManifest.path,
+            "review-decision", workspace.runManifest.path,
             "--decision", decision,
-            "--reviewer", reviewer,
+            "--reviewer", reviewer.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "macOS user" : reviewer,
             "--note", note,
         ]
         for reroll in rerolls {
-            arguments.append(contentsOf: ["--reroll", "\(reroll.shotID):\(reroll.note)"])
+            arguments.append(contentsOf: [
+                "--reroll",
+                "\(reroll.shotID.trimmingCharacters(in: .whitespacesAndNewlines)):\(reroll.note.trimmingCharacters(in: .whitespacesAndNewlines))",
+            ])
         }
-        _ = try await FilmToolClient(executable: filmToolPath).run(
+        _ = try await FilmToolClient(executable: filmTool.path).run(
             arguments,
             environment: processEnvironment()
         )
