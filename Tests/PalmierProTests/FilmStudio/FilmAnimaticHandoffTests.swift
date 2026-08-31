@@ -36,7 +36,7 @@ struct FilmAnimaticHandoffTests {
             of: "mere.run/film-animatic-handoff.v1",
             with: "mere.run/film-animatic-handoff.v999"
         ))
-        defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()) }
+        defer { removeHandoffRoot(url) }
 
         #expect(throws: FilmAnimaticHandoff.ValidationError.unsupportedContract("mere.run/film-animatic-handoff.v999")) {
             _ = try FilmAnimaticHandoff.load(from: url)
@@ -49,7 +49,7 @@ struct FilmAnimaticHandoffTests {
             of: "clips/SHOT-001.mp4",
             with: "../outside.mp4"
         ))
-        defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()) }
+        defer { removeHandoffRoot(url) }
 
         #expect(throws: FilmAnimaticHandoff.ValidationError.invalidPath("../outside.mp4")) {
             _ = try FilmAnimaticHandoff.load(from: url)
@@ -62,9 +62,64 @@ struct FilmAnimaticHandoffTests {
             of: "\"clipAssetId\": \"film_asset_clip_1\"",
             with: "\"clipAssetId\": \"missing_asset\""
         ))
-        defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()) }
+        defer { removeHandoffRoot(url) }
 
         #expect(throws: FilmAnimaticHandoff.ValidationError.missingAssetReference("missing_asset")) {
+            _ = try FilmAnimaticHandoff.load(from: url)
+        }
+    }
+
+    @Test
+    func rejectsWrongShotAssetKind() throws {
+        let url = try writeHandoff(validHandoffJSON.replacingOccurrences(
+            of: "\"kind\": \"shot-clip\",\n              \"relativePath\": \"clips/SHOT-001.mp4\"",
+            with: "\"kind\": \"rough-cut\",\n              \"relativePath\": \"clips/SHOT-001.mp4\""
+        ))
+        defer { removeHandoffRoot(url) }
+
+        #expect(throws: FilmAnimaticHandoff.ValidationError.invalidAssetKind("film_asset_clip_1")) {
+            _ = try FilmAnimaticHandoff.load(from: url)
+        }
+    }
+
+    @Test
+    func rejectsUnknownCharacterReference() throws {
+        let url = try writeHandoff(validHandoffJSON.replacingOccurrences(
+            of: "\"characterIds\": [\"keeper\"]",
+            with: "\"characterIds\": [\"missing-character\"]",
+            maxReplacements: 1
+        ))
+        defer { removeHandoffRoot(url) }
+
+        #expect(throws: FilmAnimaticHandoff.ValidationError.unknownCharacter("missing-character")) {
+            _ = try FilmAnimaticHandoff.load(from: url)
+        }
+    }
+
+    @Test
+    func rejectsDuplicateShotOrder() throws {
+        let url = try writeHandoff(validHandoffJSON.replacingOccurrences(
+            of: "\"order\": 1,",
+            with: "\"order\": 0,"
+        ))
+        defer { removeHandoffRoot(url) }
+
+        #expect(throws: FilmAnimaticHandoff.ValidationError.duplicateShotOrder(0)) {
+            _ = try FilmAnimaticHandoff.load(from: url)
+        }
+    }
+
+    @Test
+    func rejectsDiscontinuousTimeline() throws {
+        let url = try writeHandoff(validHandoffJSON.replacingOccurrences(
+            of: "\"timelineStartMilliseconds\": 3000,",
+            with: "\"timelineStartMilliseconds\": 3100,"
+        ))
+        defer { removeHandoffRoot(url) }
+
+        #expect(throws: FilmAnimaticHandoff.ValidationError.invalidTimeline(
+            "shot SHOT-002 does not begin at the expected timeline position"
+        )) {
             _ = try FilmAnimaticHandoff.load(from: url)
         }
     }
@@ -77,6 +132,12 @@ struct FilmAnimaticHandoffTests {
         let url = directory.appending(path: "film-animatic-handoff.json")
         try Data(json.utf8).write(to: url)
         return url
+    }
+
+    private func removeHandoffRoot(_ url: URL) {
+        try? FileManager.default.removeItem(
+            at: url.deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+        )
     }
 
     private var validHandoffJSON: String {
@@ -207,5 +268,26 @@ struct FilmAnimaticHandoffTests {
           }
         }
         """
+    }
+}
+
+private extension String {
+    func replacingOccurrences(
+        of target: String,
+        with replacement: String,
+        maxReplacements: Int
+    ) -> String {
+        guard maxReplacements > 0 else { return self }
+        var result = self
+        var searchStart = result.startIndex
+        var remaining = maxReplacements
+        while remaining > 0,
+              let range = result.range(of: target, range: searchStart..<result.endIndex) {
+            result.replaceSubrange(range, with: replacement)
+            searchStart = result.index(range.lowerBound, offsetBy: replacement.count, limitedBy: result.endIndex)
+                ?? result.endIndex
+            remaining -= 1
+        }
+        return result
     }
 }
