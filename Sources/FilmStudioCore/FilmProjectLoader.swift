@@ -51,8 +51,9 @@ public enum FilmProjectLoader {
 
     public static func load(runManifest input: URL) throws -> FilmWorkspaceSnapshot {
         let fileManager = FileManager.default
-        let run = input.standardizedFileURL.resolvingSymlinksInPath()
-        guard fileManager.fileExists(atPath: run.path) else {
+        let run = resolvedRunManifestInput(input, fileManager: fileManager)
+        var isDirectory: ObjCBool = false
+        guard fileManager.fileExists(atPath: run.path, isDirectory: &isDirectory), !isDirectory.boolValue else {
             throw FilmProjectError.missingRunManifest(run)
         }
 
@@ -67,7 +68,6 @@ public enum FilmProjectLoader {
         }
 
         let files = try workspaceFiles(run: run, manifest: manifest)
-        var isDirectory: ObjCBool = false
         guard fileManager.fileExists(atPath: files.root.path, isDirectory: &isDirectory), isDirectory.boolValue else {
             throw FilmProjectError.invalidRunManifest(
                 "local.outputDirectory does not resolve to a film workspace: \(files.root.path)"
@@ -95,6 +95,27 @@ public enum FilmProjectLoader {
         } catch {
             throw FilmProjectError.invalidProject(error.localizedDescription)
         }
+    }
+
+    private static func resolvedRunManifestInput(_ input: URL, fileManager: FileManager) -> URL {
+        let standardized = input.standardizedFileURL.resolvingSymlinksInPath()
+        var isDirectory: ObjCBool = false
+        if fileManager.fileExists(atPath: standardized.path, isDirectory: &isDirectory) {
+            return isDirectory.boolValue
+                ? standardized.appending(path: "run.json").standardizedFileURL.resolvingSymlinksInPath()
+                : standardized
+        }
+
+        // Older Palmier callers normalized every non-`run.json` input as if it
+        // were a directory. Recover a custom-named JSON manifest from that
+        // `<manifest>/run.json` shape so persisted projects remain compatible.
+        if standardized.lastPathComponent == "run.json" {
+            let parent = standardized.deletingLastPathComponent()
+            if fileManager.fileExists(atPath: parent.path, isDirectory: &isDirectory), !isDirectory.boolValue {
+                return parent.standardizedFileURL.resolvingSymlinksInPath()
+            }
+        }
+        return standardized
     }
 
     private static func workspaceFiles(run: URL, manifest: RunManifest) throws -> WorkspaceFiles {
