@@ -129,7 +129,7 @@ public struct FilmAnimaticHandoff: Codable, Sendable, Equatable {
         case invalidResolution(Int, Int)
         case duplicateShotID(String)
         case invalidShotTiming(String)
-        case invalidClipPath(String)
+        case invalidPath(String)
 
         public var errorDescription: String? {
             switch self {
@@ -143,8 +143,8 @@ public struct FilmAnimaticHandoff: Codable, Sendable, Equatable {
                 "Film handoff contains duplicate shot id: \(id)"
             case .invalidShotTiming(let id):
                 "Film handoff contains invalid timing for shot: \(id)"
-            case .invalidClipPath(let id):
-                "Film handoff contains an invalid clip path for shot: \(id)"
+            case .invalidPath(let path):
+                "Film handoff contains an invalid relative path: \(path)"
             }
         }
     }
@@ -166,6 +166,19 @@ public struct FilmAnimaticHandoff: Codable, Sendable, Equatable {
             throw ValidationError.invalidResolution(timeline.resolution.width, timeline.resolution.height)
         }
 
+        let topLevelPaths = [
+            project.runManifest,
+            project.filmProject,
+            media.dialogueBed,
+            media.musicBed,
+            media.effectsBed,
+            media.roughCut,
+            media.deliveryMaster,
+        ].compactMap { $0 }
+        for path in topLevelPaths where !Self.isSafeRelativePath(path) {
+            throw ValidationError.invalidPath(path)
+        }
+
         var ids = Set<String>()
         for shot in shots {
             guard ids.insert(shot.shotId).inserted else {
@@ -181,9 +194,11 @@ public struct FilmAnimaticHandoff: Codable, Sendable, Equatable {
                   shot.timeline.trimOutSeconds >= 0 else {
                 throw ValidationError.invalidShotTiming(shot.shotId)
             }
-            let path = shot.clipPath.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !path.isEmpty, !URL(fileURLWithPath: path).isFileURL || !path.hasPrefix("/") else {
-                throw ValidationError.invalidClipPath(shot.shotId)
+            guard Self.isSafeRelativePath(shot.clipPath) else {
+                throw ValidationError.invalidPath(shot.clipPath)
+            }
+            for path in [shot.audio.dialogueBed, shot.audio.musicBed, shot.audio.effectsBed, shot.evidence.clip, shot.evidence.cut].compactMap({ $0 }) where !Self.isSafeRelativePath(path) {
+                throw ValidationError.invalidPath(path)
             }
         }
     }
@@ -202,5 +217,12 @@ public struct FilmAnimaticHandoff: Codable, Sendable, Equatable {
         runManifest.deletingLastPathComponent()
             .appending(path: relativePath)
             .standardizedFileURL
+    }
+
+    private static func isSafeRelativePath(_ rawPath: String) -> Bool {
+        let path = rawPath.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !path.isEmpty, !path.hasPrefix("/"), !path.hasPrefix("~") else { return false }
+        let components = NSString(string: path).pathComponents
+        return !components.contains("..") && !components.contains(".")
     }
 }
