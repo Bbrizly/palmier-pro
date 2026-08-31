@@ -18,10 +18,11 @@ extension FilmStudioService {
         filmToolExecutable: String
     ) async throws -> FilmAnimaticHandoff {
         try Task.checkCancellation()
+        let workspace = try FilmProjectLoader.load(runManifest: runManifest)
         let filmTool = try FilmToolClient.resolveExecutable(filmToolExecutable)
         let result = try await FilmToolClient(executable: filmTool.path).run([
             "export-animatic",
-            runManifest.standardizedFileURL.path,
+            workspace.runManifest.path,
         ])
         try Task.checkCancellation()
 
@@ -31,9 +32,7 @@ extension FilmStudioService {
         }
 
         let manifestURL = URL(fileURLWithPath: response.manifest).standardizedFileURL
-        let projectRoot = runManifest.deletingLastPathComponent()
-            .standardizedFileURL
-            .resolvingSymlinksInPath()
+        let projectRoot = workspace.root.standardizedFileURL.resolvingSymlinksInPath()
         let resolvedManifest = manifestURL.resolvingSymlinksInPath()
         let rootPrefix = projectRoot.path.hasSuffix("/") ? projectRoot.path : projectRoot.path + "/"
         guard resolvedManifest.path.hasPrefix(rootPrefix) else {
@@ -58,17 +57,24 @@ extension FilmStudioService {
 
         let handoff = try FilmAnimaticHandoff.load(from: resolvedManifest)
         guard handoff.source.projectId == response.projectId,
+              handoff.source.projectId == workspace.project.projectId,
               handoff.shots.count == response.shots,
               handoff.assets.count == response.assets else {
-            throw FilmStudioServiceError.invalidResponse("The Animatic handoff does not match the export receipt.")
+            throw FilmStudioServiceError.invalidResponse("The Animatic handoff does not match the export receipt or loaded film project.")
         }
 
         let declaredRun = try handoff.resolveRunManifest(relativeTo: resolvedManifest)
             .standardizedFileURL
             .resolvingSymlinksInPath()
-        let requestedRun = runManifest.standardizedFileURL.resolvingSymlinksInPath()
+        let requestedRun = workspace.runManifest.standardizedFileURL.resolvingSymlinksInPath()
         guard declaredRun == requestedRun else {
             throw FilmStudioServiceError.invalidResponse("The Animatic handoff belongs to a different film run.")
+        }
+        let declaredRoot = try handoff.projectRootURL(relativeTo: resolvedManifest)
+            .standardizedFileURL
+            .resolvingSymlinksInPath()
+        guard declaredRoot == projectRoot else {
+            throw FilmStudioServiceError.invalidResponse("The Animatic handoff declares a different film workspace.")
         }
 
         try validateHandoffMedia(handoff, handoffURL: resolvedManifest)
