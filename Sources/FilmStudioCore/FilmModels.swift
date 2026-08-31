@@ -43,7 +43,9 @@ public struct FilmWorkspaceSnapshot: Sendable, Equatable {
 
 public struct FilmProject: Decodable, Sendable, Equatable {
     public let contractVersion: String
+    public let projectId: String
     public let title: String
+    public let idea: String
     public let updatedAt: String
     public let status: String
     public let phase: String
