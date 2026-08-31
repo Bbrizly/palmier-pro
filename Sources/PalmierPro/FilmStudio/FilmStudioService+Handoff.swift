@@ -1,9 +1,15 @@
+import CryptoKit
 import FilmStudioCore
 import Foundation
 
 extension FilmStudioService {
     private struct AnimaticExportResponse: Decodable {
         let manifest: String
+        let manifestSha256: String
+        let projectId: String
+        let shots: Int
+        let assets: Int
+        let bytes: Int
     }
 
     @concurrent
@@ -21,7 +27,7 @@ extension FilmStudioService {
 
         guard let data = result.stdout.data(using: .utf8),
               let response = try? JSONDecoder().decode(AnimaticExportResponse.self, from: data) else {
-            throw FilmStudioServiceError.invalidResponse("Film Tools did not return an Animatic handoff manifest.")
+            throw FilmStudioServiceError.invalidResponse("Film Tools did not return a complete Animatic handoff receipt.")
         }
 
         let manifestURL = URL(fileURLWithPath: response.manifest).standardizedFileURL
@@ -34,7 +40,29 @@ extension FilmStudioService {
             throw FilmStudioServiceError.invalidResponse("Film Tools returned a handoff outside the film project.")
         }
 
+        let fileManager = FileManager.default
+        var isDirectory: ObjCBool = false
+        guard fileManager.fileExists(atPath: resolvedManifest.path, isDirectory: &isDirectory),
+              !isDirectory.boolValue else {
+            throw FilmStudioServiceError.invalidResponse("Film Tools returned a handoff manifest that does not exist.")
+        }
+        let manifestAttributes = try fileManager.attributesOfItem(atPath: resolvedManifest.path)
+        guard let manifestSize = manifestAttributes[.size] as? NSNumber,
+              manifestSize.intValue == response.bytes else {
+            throw FilmStudioServiceError.invalidResponse("The Animatic handoff manifest changed after export.")
+        }
+        let manifestHash = try sha256(of: resolvedManifest)
+        guard manifestHash == response.manifestSha256 else {
+            throw FilmStudioServiceError.invalidResponse("The Animatic handoff manifest failed its SHA-256 integrity check.")
+        }
+
         let handoff = try FilmAnimaticHandoff.load(from: resolvedManifest)
+        guard handoff.source.projectId == response.projectId,
+              handoff.shots.count == response.shots,
+              handoff.assets.count == response.assets else {
+            throw FilmStudioServiceError.invalidResponse("The Animatic handoff does not match the export receipt.")
+        }
+
         let declaredRun = try handoff.resolveRunManifest(relativeTo: resolvedManifest)
             .standardizedFileURL
             .resolvingSymlinksInPath()
@@ -55,14 +83,20 @@ extension FilmStudioService {
         let fileManager = FileManager.default
 
         for asset in handoff.assets {
+            try Task.checkCancellation()
             let url = try handoff.resolveAsset(asset, relativeTo: handoffURL)
             var isDirectory: ObjCBool = false
             guard fileManager.fileExists(atPath: url.path, isDirectory: &isDirectory), !isDirectory.boolValue else {
                 throw FilmStudioServiceError.invalidResponse("Missing handoff asset: \(asset.relativePath)")
             }
             let attributes = try fileManager.attributesOfItem(atPath: url.path)
-            if let size = attributes[.size] as? NSNumber, size.intValue != asset.bytes {
+            guard let size = attributes[.size] as? NSNumber,
+                  size.intValue == asset.bytes else {
                 throw FilmStudioServiceError.invalidResponse("Handoff asset size changed after export: \(asset.relativePath)")
+            }
+            let actualHash = try sha256(of: url)
+            guard actualHash == asset.sha256 else {
+                throw FilmStudioServiceError.invalidResponse("Handoff asset failed its SHA-256 integrity check: \(asset.relativePath)")
             }
         }
 
@@ -75,5 +109,20 @@ extension FilmStudioService {
                 )
             }
         }
+    }
+
+    @concurrent
+    private static func sha256(of url: URL) throws -> String {
+        let handle = try FileHandle(forReadingFrom: url)
+        defer { try? handle.close() }
+
+        var hasher = SHA256()
+        while true {
+            try Task.checkCancellation()
+            guard let data = try handle.read(upToCount: 1024 * 1024), !data.isEmpty else { break }
+            hasher.update(data: data)
+        }
+        let digest = hasher.finalize()
+        return "sha256:" + digest.map { String(format: "%02x", $0) }.joined()
     }
 }
