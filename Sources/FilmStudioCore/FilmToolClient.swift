@@ -1,4 +1,9 @@
 import Foundation
+#if canImport(Darwin)
+import Darwin
+#elseif canImport(Glibc)
+import Glibc
+#endif
 
 public struct ProcessResult: Sendable, Equatable {
     public let executable: String
@@ -41,6 +46,7 @@ public struct FilmToolClient: Sendable {
         _ arguments: [String],
         environment: [String: String] = [:]
     ) async throws -> ProcessResult {
+        try Task.checkCancellation()
         let executableURL = try Self.resolveExecutable(executable)
         return try await Self.runProcess(
             executableURL: executableURL,
@@ -96,6 +102,7 @@ public struct FilmToolClient: Sendable {
         arguments: [String],
         environment: [String: String]
     ) async throws -> ProcessResult {
+        try Task.checkCancellation()
         let fileManager = FileManager.default
         let temporaryDirectory = fileManager.temporaryDirectory
             .appending(path: "palmier-film-tool-\(UUID().uuidString)", directoryHint: .isDirectory)
@@ -111,9 +118,12 @@ public struct FilmToolClient: Sendable {
 
         let stdoutHandle = try FileHandle(forWritingTo: stdoutURL)
         let stderrHandle = try FileHandle(forWritingTo: stderrURL)
+        var handlesClosed = false
         defer {
-            try? stdoutHandle.close()
-            try? stderrHandle.close()
+            if !handlesClosed {
+                try? stdoutHandle.close()
+                try? stderrHandle.close()
+            }
         }
 
         let process = Process()
@@ -135,14 +145,13 @@ public struct FilmToolClient: Sendable {
                 try await Task.sleep(for: .milliseconds(50))
             }
         } catch {
-            if process.isRunning {
-                process.terminate()
-            }
+            await terminate(process)
             throw error
         }
 
         try stdoutHandle.close()
         try stderrHandle.close()
+        handlesClosed = true
 
         let stdout = String(decoding: try Data(contentsOf: stdoutURL), as: UTF8.self)
             .trimmingCharacters(in: .whitespacesAndNewlines)
@@ -159,5 +168,25 @@ public struct FilmToolClient: Sendable {
             throw FilmToolError.commandFailed(result)
         }
         return result
+    }
+
+    @concurrent
+    private static func terminate(_ process: Process) async {
+        guard process.isRunning else { return }
+        process.terminate()
+        for _ in 0..<20 {
+            if !process.isRunning { return }
+            try? await Task.sleep(for: .milliseconds(100))
+        }
+        guard process.isRunning else { return }
+        #if canImport(Darwin)
+        _ = Darwin.kill(process.processIdentifier, SIGKILL)
+        #elseif canImport(Glibc)
+        _ = Glibc.kill(process.processIdentifier, SIGKILL)
+        #endif
+        for _ in 0..<10 {
+            if !process.isRunning { return }
+            try? await Task.sleep(for: .milliseconds(50))
+        }
     }
 }
