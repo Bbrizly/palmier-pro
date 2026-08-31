@@ -11,6 +11,7 @@ enum MainMenuBuilder {
         mainMenu.addItem(fileMenu())
         mainMenu.addItem(editMenu())
         mainMenu.addItem(viewMenu())
+        mainMenu.addItem(windowMenu())
         mainMenu.addItem(helpMenu())
         return mainMenu
     }
@@ -102,11 +103,11 @@ enum MainMenuBuilder {
 
         menu.addItem(.separator())
 
-        let deleteItem = NSMenuItem(title: L10n.string("Delete"), action: #selector(EditorActions.deleteSelectedClips(_:)), keyEquivalent: "\u{8}") // backspace
+        let deleteItem = NSMenuItem(title: L10n.string("Delete"), action: #selector(EditorActions.deleteSelectedClips(_:)), keyEquivalent: "\u{8}")
         deleteItem.keyEquivalentModifierMask = []
         menu.addItem(deleteItem)
 
-        let rippleDeleteItem = NSMenuItem(title: L10n.string("Ripple Delete"), action: #selector(EditorActions.rippleDeleteSelected(_:)), keyEquivalent: "\u{8}") // backspace
+        let rippleDeleteItem = NSMenuItem(title: L10n.string("Ripple Delete"), action: #selector(EditorActions.rippleDeleteSelected(_:)), keyEquivalent: "\u{8}")
         rippleDeleteItem.keyEquivalentModifierMask = [.shift]
         menu.addItem(rippleDeleteItem)
 
@@ -169,6 +170,38 @@ enum MainMenuBuilder {
         submenu.addItem(verticalItem)
 
         item.submenu = submenu
+        return item
+    }
+
+    // MARK: - Window menu
+
+    private static func windowMenu() -> NSMenuItem {
+        let item = NSMenuItem()
+        let menu = NSMenu(title: L10n.string("Window"))
+
+        menu.addItem(withTitle: L10n.string("Minimize"), action: #selector(NSWindow.performMiniaturize(_:)), keyEquivalent: "m")
+        menu.addItem(withTitle: L10n.string("Zoom"), action: #selector(NSWindow.performZoom(_:)), keyEquivalent: "")
+        menu.addItem(.separator())
+
+        let filmStudioItem = NSMenuItem(
+            title: L10n.string("Film Studio"),
+            action: #selector(AppDelegate.showFilmStudio(_:)),
+            keyEquivalent: ""
+        )
+        filmStudioItem.target = NSApp.delegate
+        menu.addItem(filmStudioItem)
+
+        menu.addItem(.separator())
+        let frontItem = NSMenuItem(
+            title: L10n.string("Bring All to Front"),
+            action: #selector(NSApplication.arrangeInFront(_:)),
+            keyEquivalent: ""
+        )
+        frontItem.target = NSApp
+        menu.addItem(frontItem)
+
+        NSApp.windowsMenu = menu
+        item.submenu = menu
         return item
     }
 

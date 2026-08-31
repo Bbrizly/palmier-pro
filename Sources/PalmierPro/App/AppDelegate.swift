@@ -2,7 +2,7 @@ import AppKit
 import ClerkKit
 
 @MainActor
-final class AppDelegate: NSObject, NSApplicationDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     static let shared = AppDelegate()
 
     private var isTerminating = false
@@ -66,6 +66,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                         processID: ProcessInfo.processInfo.processIdentifier
                     )
                 }
+                await FilmStudioService.stopManagedAgentServer()
                 await SkillStore.shared.prepareForTermination()
                 if !MLXRuntime.beginTermination() {
                     await MLXRuntime.waitUntilIdle()
@@ -131,6 +132,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         return components.string ?? url.scheme ?? "unknown"
     }
 
+    func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
+        if menuItem.action == #selector(showFilmStudio(_:)) {
+            return AppState.shared.activeProject?.editorViewModel != nil
+        }
+        return true
+    }
+
     @MainActor
     @objc func newProject(_ sender: Any?) {
         AppState.shared.createProjectInteractively()
@@ -144,6 +152,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @MainActor
     @objc func showSettings(_ sender: Any?) {
         SettingsWindowController.shared.show()
+    }
+
+    @MainActor
+    @objc func showFilmStudio(_ sender: Any?) {
+        guard AppState.shared.activeProject?.editorViewModel != nil else { return }
+        FilmStudioWindowController.shared.show()
     }
 
     @MainActor
