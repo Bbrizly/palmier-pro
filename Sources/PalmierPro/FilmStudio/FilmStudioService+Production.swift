@@ -15,7 +15,8 @@ extension FilmStudioService {
         guard 1...4 ~= takesPerShot else {
             throw FilmStudioServiceError.invalidResponse("Takes per shot must be between 1 and 4.")
         }
-        _ = try await FilmToolClient(executable: filmToolPath).run(
+        let filmTool = try await FilmStudioRuntimeCompatibility.requireFilmTools(filmToolPath)
+        _ = try await FilmToolClient(executable: filmTool.path).run(
             [
                 "configure", runManifest.path,
                 "--mode", mode,
@@ -30,7 +31,8 @@ extension FilmStudioService {
         runManifest: URL,
         filmToolPath: String
     ) async throws {
-        _ = try await FilmToolClient(executable: filmToolPath).run(
+        let filmTool = try await FilmStudioRuntimeCompatibility.requireFilmTools(filmToolPath)
+        _ = try await FilmToolClient(executable: filmTool.path).run(
             ["preflight", runManifest.path],
             environment: processEnvironment()
         )
@@ -41,7 +43,8 @@ extension FilmStudioService {
         runManifest: URL,
         filmToolPath: String
     ) async throws {
-        _ = try await FilmToolClient(executable: filmToolPath).run(
+        let filmTool = try await FilmStudioRuntimeCompatibility.requireFilmTools(filmToolPath)
+        _ = try await FilmToolClient(executable: filmTool.path).run(
             ["run", runManifest.path],
             environment: processEnvironment()
         )
