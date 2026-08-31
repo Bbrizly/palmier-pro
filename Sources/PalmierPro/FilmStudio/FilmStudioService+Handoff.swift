@@ -19,7 +19,7 @@ extension FilmStudioService {
     ) async throws -> FilmAnimaticHandoff {
         try Task.checkCancellation()
         let workspace = try FilmProjectLoader.load(runManifest: runManifest)
-        let filmTool = try FilmToolClient.resolveExecutable(filmToolExecutable)
+        let filmTool = try await FilmStudioRuntimeCompatibility.requireFilmTools(filmToolExecutable)
         let result = try await FilmToolClient(executable: filmTool.path).run([
             "export-animatic",
             workspace.runManifest.path,
