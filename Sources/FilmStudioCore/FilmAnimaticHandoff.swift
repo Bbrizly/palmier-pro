@@ -121,10 +121,18 @@ public struct FilmAnimaticHandoff: Codable, Sendable, Equatable {
         case unsupportedContract(String)
         case unsupportedProjectContract(String)
         case invalidProject(String)
+        case duplicateCastID(String)
+        case duplicateLocationID(String)
         case duplicateShotID(String)
+        case duplicateShotOrder(Int)
         case duplicateAssetID(String)
+        case duplicateAssetPath(String)
         case invalidShot(String)
+        case invalidTimeline(String)
+        case unknownCharacter(String)
+        case unknownLocation(String)
         case missingAssetReference(String)
+        case invalidAssetKind(String)
         case invalidPath(String)
         case invalidChecksum(String)
 
@@ -136,14 +144,30 @@ public struct FilmAnimaticHandoff: Codable, Sendable, Equatable {
                 "Unsupported film project contract in handoff: \(value)"
             case .invalidProject(let reason):
                 "Invalid film handoff project: \(reason)"
+            case .duplicateCastID(let id):
+                "Film handoff contains duplicate cast id: \(id)"
+            case .duplicateLocationID(let id):
+                "Film handoff contains duplicate location id: \(id)"
             case .duplicateShotID(let id):
                 "Film handoff contains duplicate shot id: \(id)"
+            case .duplicateShotOrder(let order):
+                "Film handoff contains duplicate shot order: \(order)"
             case .duplicateAssetID(let id):
                 "Film handoff contains duplicate asset id: \(id)"
+            case .duplicateAssetPath(let path):
+                "Film handoff contains duplicate asset path: \(path)"
             case .invalidShot(let id):
                 "Film handoff contains invalid timing or metadata for shot: \(id)"
+            case .invalidTimeline(let reason):
+                "Film handoff timeline is invalid: \(reason)"
+            case .unknownCharacter(let id):
+                "Film handoff references unknown cast id: \(id)"
+            case .unknownLocation(let id):
+                "Film handoff references unknown location id: \(id)"
             case .missingAssetReference(let id):
                 "Film handoff references an unknown asset: \(id)"
+            case .invalidAssetKind(let id):
+                "Film handoff asset has the wrong kind for its reference: \(id)"
             case .invalidPath(let path):
                 "Film handoff contains an invalid path: \(path)"
             case .invalidChecksum(let checksum):
@@ -165,6 +189,9 @@ public struct FilmAnimaticHandoff: Codable, Sendable, Equatable {
         guard source.projectContractVersion == Self.supportedProjectContractVersion else {
             throw ValidationError.unsupportedProjectContract(source.projectContractVersion)
         }
+        guard !source.projectId.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            throw ValidationError.invalidProject("source project id is required")
+        }
         guard !project.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
               !project.idea.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
               project.durationMilliseconds > 0,
@@ -178,6 +205,9 @@ public struct FilmAnimaticHandoff: Codable, Sendable, Equatable {
         if let height = project.height, height <= 0 {
             throw ValidationError.invalidProject("height must be positive when present")
         }
+        guard (project.width == nil) == (project.height == nil) else {
+            throw ValidationError.invalidProject("width and height must either both be present or both be null")
+        }
         guard !shots.isEmpty else {
             throw ValidationError.invalidProject("at least one shot is required")
         }
@@ -188,10 +218,47 @@ public struct FilmAnimaticHandoff: Codable, Sendable, Equatable {
             throw ValidationError.invalidPath(source.runManifest)
         }
 
+        var castIDs = Set<String>()
+        for member in cast {
+            guard castIDs.insert(member.id).inserted else {
+                throw ValidationError.duplicateCastID(member.id)
+            }
+            guard !member.id.isEmpty,
+                  !member.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                  !member.visual.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                  !member.wardrobe.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                  !member.voice.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                throw ValidationError.invalidProject("cast entries require id, name, visual, wardrobe, and voice")
+            }
+        }
+
+        var locationIDs = Set<String>()
+        for location in locations {
+            guard locationIDs.insert(location.id).inserted else {
+                throw ValidationError.duplicateLocationID(location.id)
+            }
+            guard !location.id.isEmpty,
+                  !location.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                  !location.visual.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                  !location.ambience.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                throw ValidationError.invalidProject("location entries require id, name, visual, and ambience")
+            }
+        }
+
         var assetIDs = Set<String>()
+        var assetPaths = Set<String>()
         for asset in assets {
             guard assetIDs.insert(asset.id).inserted else {
                 throw ValidationError.duplicateAssetID(asset.id)
+            }
+            guard assetPaths.insert(asset.relativePath).inserted else {
+                throw ValidationError.duplicateAssetPath(asset.relativePath)
+            }
+            guard !asset.id.isEmpty,
+                  !asset.kind.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                  !asset.contentType.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                  !asset.source.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                throw ValidationError.invalidProject("asset id, kind, content type, and source are required")
             }
             guard Self.isSafeRelativePath(asset.relativePath) else {
                 throw ValidationError.invalidPath(asset.relativePath)
@@ -202,34 +269,93 @@ public struct FilmAnimaticHandoff: Codable, Sendable, Equatable {
         }
 
         var shotIDs = Set<String>()
+        var shotOrders = Set<Int>()
         for shot in shots {
             guard shotIDs.insert(shot.id).inserted else {
                 throw ValidationError.duplicateShotID(shot.id)
             }
-            let end = shot.timelineStartMilliseconds + shot.durationMilliseconds
+            guard shotOrders.insert(shot.order).inserted else {
+                throw ValidationError.duplicateShotOrder(shot.order)
+            }
+            let end = shot.timelineStartMilliseconds.addingReportingOverflow(shot.durationMilliseconds)
             guard shot.order >= 0,
                   shot.timelineStartMilliseconds >= 0,
                   shot.durationMilliseconds > 0,
-                  end <= project.durationMilliseconds,
+                  !end.overflow,
+                  end.partialValue <= project.durationMilliseconds,
                   shot.take >= 1,
-                  !shot.purpose.isEmpty,
-                  !shot.prompt.isEmpty,
-                  !shot.framePrompt.isEmpty,
-                  !shot.locationId.isEmpty else {
+                  shot.seed >= 0,
+                  !shot.id.isEmpty,
+                  !shot.purpose.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                  !shot.prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                  !shot.framePrompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                  !shot.locationId.isEmpty,
+                  shot.transition == "cut" || shot.transition == "fade" else {
                 throw ValidationError.invalidShot(shot.id)
             }
-            if let id = shot.keyframeAssetId, asset(id: id) == nil {
-                throw ValidationError.missingAssetReference(id)
-            }
-            if let id = shot.clipAssetId, asset(id: id) == nil {
-                throw ValidationError.missingAssetReference(id)
-            }
-            for line in shot.dialogue where !line.startSeconds.isFinite || line.startSeconds < 0 {
+            guard Set(shot.characterIds).count == shot.characterIds.count else {
                 throw ValidationError.invalidShot(shot.id)
             }
-            for cue in shot.soundEffects where !cue.startSeconds.isFinite || cue.startSeconds < 0 || !cue.durationSeconds.isFinite || cue.durationSeconds <= 0 || !cue.levelDb.isFinite {
-                throw ValidationError.invalidShot(shot.id)
+            for characterID in shot.characterIds where !castIDs.contains(characterID) {
+                throw ValidationError.unknownCharacter(characterID)
             }
+            guard locationIDs.contains(shot.locationId) else {
+                throw ValidationError.unknownLocation(shot.locationId)
+            }
+            if let id = shot.keyframeAssetId {
+                guard let referenced = asset(id: id) else {
+                    throw ValidationError.missingAssetReference(id)
+                }
+                guard referenced.kind == "shot-keyframe" else {
+                    throw ValidationError.invalidAssetKind(id)
+                }
+            }
+            if let id = shot.clipAssetId {
+                guard let referenced = asset(id: id) else {
+                    throw ValidationError.missingAssetReference(id)
+                }
+                guard referenced.kind == "shot-clip" else {
+                    throw ValidationError.invalidAssetKind(id)
+                }
+            }
+            for line in shot.dialogue {
+                guard line.startSeconds.isFinite,
+                      line.startSeconds >= 0,
+                      line.startSeconds < shot.durationSeconds,
+                      shot.characterIds.contains(line.speaker),
+                      !line.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                      !line.delivery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                    throw ValidationError.invalidShot(shot.id)
+                }
+            }
+            for cue in shot.soundEffects {
+                guard cue.startSeconds.isFinite,
+                      cue.startSeconds >= 0,
+                      cue.startSeconds < shot.durationSeconds,
+                      cue.durationSeconds.isFinite,
+                      cue.durationSeconds > 0,
+                      cue.durationSeconds <= shot.durationSeconds,
+                      cue.levelDb.isFinite,
+                      cue.seed >= 0,
+                      !cue.prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                    throw ValidationError.invalidShot(shot.id)
+                }
+            }
+        }
+
+        let expectedOrders = Set(0..<shots.count)
+        guard shotOrders == expectedOrders else {
+            throw ValidationError.invalidTimeline("shot order must be contiguous from zero")
+        }
+        var cursor = 0
+        for shot in orderedShots {
+            guard shot.timelineStartMilliseconds == cursor else {
+                throw ValidationError.invalidTimeline("shot \(shot.id) does not begin at the expected timeline position")
+            }
+            cursor += shot.durationMilliseconds
+        }
+        guard cursor == project.durationMilliseconds else {
+            throw ValidationError.invalidTimeline("shot durations do not equal the declared project duration")
         }
     }
 
@@ -295,7 +421,9 @@ public struct FilmAnimaticHandoff: Codable, Sendable, Equatable {
 
     private static func isSafeProjectRoot(_ rawPath: String) -> Bool {
         let path = rawPath.trimmingCharacters(in: .whitespacesAndNewlines)
-        return !path.isEmpty && !path.hasPrefix("/") && !path.hasPrefix("~")
+        guard !path.isEmpty, !path.hasPrefix("/"), !path.hasPrefix("~") else { return false }
+        let components = NSString(string: path).pathComponents
+        return !components.contains(".")
     }
 
     private static func isSafeRelativePath(_ rawPath: String) -> Bool {
