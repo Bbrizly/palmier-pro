@@ -64,11 +64,25 @@ public struct FilmToolClient: Sendable {
             return url
         }
 
-        let path = ProcessInfo.processInfo.environment["PATH"] ?? ""
-        for directory in path.split(separator: ":") {
-            let url = URL(fileURLWithPath: String(directory), isDirectory: true)
+        let fileManager = FileManager.default
+        var directories = (ProcessInfo.processInfo.environment["PATH"] ?? "")
+            .split(separator: ":")
+            .map(String.init)
+        let standardDirectories = [
+            fileManager.homeDirectoryForCurrentUser.appending(path: ".local/bin").path,
+            "/opt/homebrew/bin",
+            "/usr/local/bin",
+            "/usr/bin",
+            "/bin",
+        ]
+        for directory in standardDirectories where !directories.contains(directory) {
+            directories.append(directory)
+        }
+
+        for directory in directories {
+            let url = URL(fileURLWithPath: directory, isDirectory: true)
                 .appending(path: trimmed)
-            if FileManager.default.isExecutableFile(atPath: url.path) {
+            if fileManager.isExecutableFile(atPath: url.path) {
                 return url.standardizedFileURL
             }
         }
